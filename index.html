@@ -8,16 +8,39 @@
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    
+    <!-- Driver.js for Tour -->
+    <script src="https://cdn.jsdelivr.net/npm/driver.js@1.0.1/dist/driver.js.iife.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/driver.js@1.0.1/dist/driver.css"/>
+
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        slate: { 850: '#1e293b' }
+                    }
+                }
+            }
+        }
     </script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        body { font-family: 'Inter', sans-serif; height: 100vh; overflow: hidden; }
+        
+        /* Custom Scrollbar for sidebar */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+
         #canvas-container {
             position: relative;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
             margin: 0 auto;
+            background-color: white;
         }
         canvas {
             display: block;
@@ -27,25 +50,30 @@
         .signature-block {
             position: absolute;
             cursor: move;
-            border: 2px dashed transparent;
+            border: 2px dashed rgba(59, 130, 246, 0.5);
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 10px;
+            padding: 8px;
             user-select: none;
             touch-action: none;
-            transition: border-color 0.2s;
+            transition: background-color 0.2s, border-color 0.2s;
+            background-color: rgba(255, 255, 255, 0.1);
         }
         .signature-block:hover {
-            border-color: #3b82f6;
-            background-color: rgba(59, 130, 246, 0.05);
+            border-color: #2563eb;
+            background-color: rgba(59, 130, 246, 0.1);
+        }
+        .signature-block.active {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
         }
         .sig-image {
             width: 100%;
             height: auto;
             pointer-events: none;
-            margin-bottom: -15px; 
+            margin-bottom: -10px; 
             z-index: 20; 
             position: relative;
             mix-blend-mode: multiply;
@@ -64,7 +92,7 @@
             text-decoration: underline;
             z-index: 10;
             position: relative;
-            padding-top: 10px; 
+            padding-top: 5px; 
         }
         .sig-date {
             font-size: 12px;
@@ -74,205 +102,279 @@
         }
         .resize-handle {
             position: absolute;
-            width: 12px;
-            height: 12px;
+            width: 14px;
+            height: 14px;
             background-color: #2563eb;
+            border: 2px solid white;
             border-radius: 50%;
-            bottom: -6px;
-            right: -6px;
+            bottom: -7px;
+            right: -7px;
             cursor: nwse-resize;
-            display: none;
+            opacity: 0;
+            transition: opacity 0.2s;
             z-index: 30;
         }
-        .signature-block:hover .resize-handle {
-            display: block;
-        }
+        .signature-block:hover .resize-handle { opacity: 1; }
+        
         .loading-spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3b82f6;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top: 3px solid white;
             border-radius: 50%;
-            width: 24px;
-            height: 24px;
+            width: 20px;
+            height: 20px;
             animation: spin 1s linear infinite;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Driver.js Customization */
+        .driver-popover.driverjs-theme {
+            background-color: #1e293b;
+            color: #ffffff;
+        }
+        .driver-popover.driverjs-theme .driver-popover-title {
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .driver-popover.driverjs-theme .driver-popover-description {
+            font-size: 14px;
+            color: #cbd5e1;
+        }
+        .driver-popover.driverjs-theme button {
+            background-color: #3b82f6;
+            color: white;
+            text-shadow: none;
+            border: none;
+        }
+        .driver-popover.driverjs-theme button:hover {
+            background-color: #2563eb;
+        }
     </style>
 </head>
-<body class="min-h-screen flex flex-col">
+<body class="flex flex-col bg-gray-50 h-screen overflow-hidden">
 
     <!-- Header -->
-    <header class="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <h1 class="text-xl font-bold text-gray-900 flex items-center gap-2">
-                <i class="fas fa-file-signature text-blue-600"></i> PDF Signer
+    <header class="bg-slate-850 text-white border-b border-slate-700 z-30 flex-none h-14">
+        <div class="w-full px-4 h-full flex items-center justify-between">
+            <h1 class="text-lg font-bold flex items-center gap-2 tracking-wide">
+                <i class="fas fa-file-signature text-blue-400"></i> <span>PDF Signer</span>
             </h1>
+            <div class="flex items-center gap-4">
+                <button id="start-tour-btn" class="text-sm text-slate-300 hover:text-white flex items-center gap-1 transition-colors">
+                    <i class="far fa-question-circle"></i> Help
+                </button>
+                <div class="text-xs text-slate-500 hidden sm:block">Secure Client-Side Processing</div>
+            </div>
         </div>
     </header>
 
-    <main class="flex-grow container mx-auto px-4 py-8 max-w-5xl">
+    <!-- Main Layout -->
+    <main class="flex flex-1 overflow-hidden relative">
         
-        <!-- Step 1: Uploads & Details -->
-        <div class="bg-white rounded-lg shadow-sm p-6 mb-6">
-            <h2 class="text-lg font-semibold text-gray-800 mb-4">1. Document Details</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <!-- Files -->
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">PDF Document(s)</label>
-                        <div class="flex gap-2">
-                            <label class="flex-1 cursor-pointer bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-md px-4 py-2 text-sm text-gray-700 transition-colors flex items-center overflow-hidden">
-                                <i class="fas fa-file-pdf mr-2 text-red-500 flex-shrink-0"></i> 
-                                <span id="pdf-name" class="truncate">Choose PDFs...</span>
-                                <input type="file" id="pdf-input" accept="application/pdf" multiple class="hidden">
-                            </label>
-                            <button id="clear-pdfs" class="hidden px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-md hover:bg-red-100 transition-colors" title="Clear all files">
-                                <i class="fas fa-trash-alt"></i>
-                            </button>
-                        </div>
+        <!-- LEFT SIDEBAR: Controls -->
+        <aside class="w-full md:w-80 lg:w-96 bg-white shadow-xl z-20 flex flex-col border-r border-gray-200 h-full transform transition-transform duration-300 absolute md:relative" id="sidebar">
+            
+            <div class="flex-1 overflow-y-auto custom-scroll p-5 space-y-6">
+                
+                <!-- Section 1: Files -->
+                <div class="space-y-3" id="tour-step-1">
+                    <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider">1. Documents</h2>
+                    
+                    <div class="space-y-2">
+                        <label class="block w-full cursor-pointer bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-700 transition-colors flex items-center justify-center border-dashed border-2">
+                            <i class="fas fa-plus-circle mr-2"></i> 
+                            <span id="pdf-name">Add PDFs</span>
+                            <input type="file" id="pdf-input" accept="application/pdf" multiple class="hidden">
+                        </label>
                         
                         <!-- File List -->
-                        <ul id="file-list" class="mt-3 space-y-2 max-h-40 overflow-y-auto hidden"></ul>
-                        <p class="text-xs text-gray-500 mt-2" id="file-count">Select one or more PDF files. You can add more later.</p>
+                        <div id="file-list-container" class="hidden">
+                            <div class="flex justify-between items-center text-xs text-gray-500 mb-1">
+                                <span id="file-count">0 files</span>
+                                <button id="clear-pdfs" class="text-red-500 hover:text-red-700">Clear All</button>
+                            </div>
+                            <ul id="file-list" class="space-y-1 max-h-32 overflow-y-auto border border-gray-100 rounded bg-gray-50 p-1"></ul>
+                        </div>
                     </div>
+                </div>
+
+                <hr class="border-gray-100">
+
+                <!-- Section 2: Signature -->
+                <div class="space-y-4" id="tour-step-2">
+                    <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider">2. Signature Info</h2>
+                    
+                    <!-- Image Input -->
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Signature Image</label>
-                        <label class="flex w-full cursor-pointer bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-md px-4 py-2 text-sm text-gray-700 transition-colors items-center">
-                            <i class="fas fa-image mr-2 text-green-500"></i> <span id="img-name" class="truncate">Choose Image...</span>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Signature Image</label>
+                        <label class="flex w-full cursor-pointer bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-600 transition-colors items-center overflow-hidden">
+                            <i class="fas fa-image mr-2 text-gray-400"></i> 
+                            <span id="img-name" class="truncate">Select PNG/JPG...</span>
                             <input type="file" id="img-input" accept="image/png, image/jpeg" class="hidden">
                         </label>
                     </div>
-                </div>
 
-                <!-- Signatory Info -->
-                <div class="space-y-4">
-                    <div>
-                        <label for="sig-name-input" class="block text-sm font-medium text-gray-700 mb-2">Signatory Name</label>
-                        <input type="text" id="sig-name-input" placeholder="e.g. John Doe" class="w-full border border-gray-300 rounded-md px-4 py-2 text-sm focus:ring-blue-500 focus:border-blue-500" disabled>
-                        <p class="text-xs text-gray-500 mt-1">Appears directly below the signature image.</p>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Date</label>
-                        <div class="w-full bg-gray-100 border border-gray-300 rounded-md px-4 py-2 text-sm text-gray-600 cursor-not-allowed">
-                            <i class="far fa-calendar-alt mr-2"></i> <span id="system-date">Loading...</span>
+                    <!-- Text Inputs -->
+                    <div class="grid grid-cols-1 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Signatory Name</label>
+                            <input type="text" id="sig-name-input" placeholder="e.g. John Doe" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" disabled>
                         </div>
-                        <p class="text-xs text-gray-500 mt-1">System date (appears below name).</p>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Date</label>
+                            <div class="w-full bg-gray-100 border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-500 cursor-not-allowed">
+                                <span id="system-date">...</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </div>
 
-        <!-- Step 2: Preview -->
-        <div id="editor-section" class="hidden bg-white rounded-lg shadow-sm p-6 mb-6">
-            
-            <!-- Controls Toolbar -->
-            <div class="flex flex-col gap-4 mb-4">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div>
-                         <h2 class="text-lg font-semibold text-gray-800">2. Review & Adjust (Per Page)</h2>
-                         <p class="text-xs text-gray-500">Positions are saved individually for every page.</p>
-                    </div>
+                <hr class="border-gray-100">
+
+                <!-- Section 3: Navigation & Position (Only visible when active) -->
+                <div id="controls-overlay" class="opacity-50 pointer-events-none transition-opacity duration-200 space-y-6">
                     
-                    <!-- Quick Position -->
-                    <div class="flex items-center gap-2">
-                         <span class="text-sm text-gray-600 font-medium hidden sm:inline">Current Page:</span>
-                         <select id="position-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2">
-                            <option value="bottom-right">Bottom Right (Default)</option>
-                            <option value="bottom-left">Bottom Left</option>
-                            <option value="bottom-center">Bottom Center</option>
-                            <option value="top-right">Top Right</option>
-                            <option value="manual" disabled>Manual (Drag to set)</option>
-                         </select>
-                         <button id="apply-all-btn" class="ml-2 text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-2 rounded border border-blue-200 transition-colors" title="Copy current position to ALL pages in ALL files">
-                            Apply to All
-                         </button>
-                    </div>
-                </div>
+                    <!-- Navigator -->
+                    <div class="bg-slate-50 p-4 rounded-lg border border-slate-100 space-y-3" id="tour-step-4">
+                        <div class="flex justify-between items-center mb-2">
+                            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Navigation</h2>
+                            <span id="current-file-display" class="text-xs font-mono bg-white px-2 py-1 rounded border text-gray-600">File 0/0</span>
+                        </div>
 
-                <div class="flex flex-col sm:flex-row justify-between items-center bg-gray-100 p-2 rounded-lg gap-4">
-                    <!-- File Navigation -->
-                    <div class="flex items-center gap-2 w-full sm:w-auto justify-center">
-                        <button id="prev-file" class="p-2 hover:bg-white rounded-md text-gray-600 disabled:opacity-50 transition-all font-medium text-sm">
-                            <i class="fas fa-file-pdf mr-1"></i> Prev File
-                        </button>
-                        <span class="text-sm font-medium px-2 min-w-[120px] text-center truncate" id="current-file-display">
-                            File 1 of 1
-                        </span>
-                        <button id="next-file" class="p-2 hover:bg-white rounded-md text-gray-600 disabled:opacity-50 transition-all font-medium text-sm">
-                            Next File <i class="fas fa-chevron-right ml-1"></i>
-                        </button>
+                        <!-- File Nav -->
+                        <div class="flex items-center justify-between gap-2">
+                            <button id="prev-file" class="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded hover:bg-gray-50 text-gray-600 text-xs font-medium transition-colors disabled:opacity-50">
+                                <i class="fas fa-chevron-left mr-1"></i> Prev File
+                            </button>
+                            <button id="next-file" class="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded hover:bg-gray-50 text-gray-600 text-xs font-medium transition-colors disabled:opacity-50">
+                                Next File <i class="fas fa-chevron-right ml-1"></i>
+                            </button>
+                        </div>
+                        
+                        <!-- Page Nav -->
+                        <div class="flex items-center justify-between bg-white rounded border border-gray-200 p-1">
+                            <button id="prev-page" class="p-2 hover:bg-gray-100 rounded text-gray-600 disabled:opacity-30 transition-all w-10">
+                                <i class="fas fa-caret-left text-lg"></i>
+                            </button>
+                            <span class="text-xs font-semibold text-gray-700">
+                                Page <span id="curr-page">1</span> / <span id="total-pages">--</span>
+                            </span>
+                            <button id="next-page" class="p-2 hover:bg-gray-100 rounded text-gray-600 disabled:opacity-30 transition-all w-10">
+                                <i class="fas fa-caret-right text-lg"></i>
+                            </button>
+                        </div>
                     </div>
 
-                    <!-- Page Navigation -->
-                    <div class="flex items-center gap-2 w-full sm:w-auto justify-center">
-                        <button id="prev-page" class="p-2 hover:bg-white rounded-md text-gray-600 disabled:opacity-50 transition-all">
-                            <i class="fas fa-chevron-left"></i>
-                        </button>
-                        <span class="text-sm font-medium px-2 min-w-[80px] text-center">
-                            Page <span id="curr-page">1</span> / <span id="total-pages">--</span>
-                        </span>
-                        <button id="next-page" class="p-2 hover:bg-white rounded-md text-gray-600 disabled:opacity-50 transition-all">
-                            <i class="fas fa-chevron-right"></i>
-                        </button>
+                    <!-- Positioning -->
+                    <div class="space-y-3" id="tour-step-5">
+                        <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Positioning</h2>
+                        
+                        <div class="space-y-2">
+                            <select id="position-select" class="w-full bg-white border border-gray-300 text-gray-700 text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 block p-2.5 outline-none">
+                                <option value="bottom-right">Bottom Right (Default)</option>
+                                <option value="bottom-left">Bottom Left</option>
+                                <option value="bottom-center">Bottom Center</option>
+                                <option value="top-right">Top Right</option>
+                                <option value="manual" disabled>Manual (Drag on canvas)</option>
+                            </select>
+                            
+                            <button id="apply-all-btn" class="w-full flex items-center justify-center gap-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold py-2 px-4 rounded border border-blue-200 transition-colors" title="Copy current position to ALL pages in ALL files">
+                                <i class="fas fa-clone"></i> Apply Position to All Pages
+                            </button>
+                        </div>
                     </div>
+
                 </div>
             </div>
 
-            <!-- Workspace -->
-            <div class="overflow-auto bg-gray-500 p-4 rounded-lg flex justify-center min-h-[500px]" id="workspace-scroll">
-                <div id="canvas-container">
+            <!-- Footer Action -->
+            <div class="p-5 border-t border-gray-200 bg-gray-50 z-20">
+                <button id="save-btn" class="w-full shadow-lg bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transform transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <i class="fas fa-file-download"></i> <span id="download-text">Download Signed PDF</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- RIGHT AREA: Canvas -->
+        <div class="flex-1 bg-gray-200/50 relative flex flex-col h-full overflow-hidden">
+            
+            <!-- Toolbar for Mobile Toggle (Hidden on large screens) -->
+            <div class="md:hidden bg-white border-b border-gray-200 p-2 flex justify-between items-center px-4">
+                <span class="text-sm font-bold text-gray-600">Preview</span>
+                <button id="toggle-sidebar" class="text-blue-600 font-medium text-sm">
+                    <i class="fas fa-sliders-h mr-1"></i> Settings
+                </button>
+            </div>
+
+            <!-- Scrollable Workspace -->
+            <div id="workspace-scroll" class="flex-1 overflow-auto p-4 md:p-8 flex justify-center items-start">
+                
+                <!-- Blank State -->
+                <div id="blank-state" class="flex flex-col items-center justify-center h-full text-gray-400 mt-20">
+                    <i class="fas fa-file-pdf text-6xl mb-4 text-gray-300"></i>
+                    <p class="text-lg font-medium">No Document Loaded</p>
+                    <p class="text-sm">Upload a PDF in the sidebar to begin.</p>
+                </div>
+
+                <!-- Canvas Container -->
+                <div id="canvas-container" class="hidden transition-transform duration-200 origin-top">
                     <canvas id="pdf-render"></canvas>
                     <!-- Signature block injected here -->
                 </div>
             </div>
-        </div>
 
-        <!-- Step 3: Action -->
-        <div id="action-section" class="hidden fixed bottom-6 left-0 right-0 px-4 flex justify-center pointer-events-none">
-            <button id="save-btn" class="pointer-events-auto shadow-lg bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full flex items-center gap-2 transform transition hover:scale-105">
-                <i class="fas fa-file-download"></i> <span id="download-text">Download Signed PDF</span>
-            </button>
-        </div>
+            <!-- Zoom Controls (Floating) -->
+            <div class="absolute bottom-6 right-6 flex gap-2">
+                <div class="bg-white shadow-md rounded-lg flex overflow-hidden border border-gray-200">
+                    <button id="zoom-out" class="p-2 hover:bg-gray-100 text-gray-600 w-10 border-r border-gray-100" title="Zoom Out"><i class="fas fa-minus"></i></button>
+                    <span id="zoom-level" class="px-3 py-2 text-xs font-mono text-gray-500 flex items-center bg-gray-50">100%</span>
+                    <button id="zoom-in" class="p-2 hover:bg-gray-100 text-gray-600 w-10 border-l border-gray-100" title="Zoom In"><i class="fas fa-plus"></i></button>
+                </div>
+            </div>
 
+        </div>
     </main>
 
-    <!-- Notification -->
-    <div id="toast" class="fixed top-4 right-4 bg-gray-800 text-white px-4 py-2 rounded shadow-lg transform translate-x-full transition-transform duration-300 z-50">
-        Message
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed top-6 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl transition-all duration-300 z-50 opacity-0 translate-y-[-20px] pointer-events-none flex items-center gap-3">
+        <i class="fas fa-check-circle text-green-400"></i> <span id="toast-msg">Message</span>
     </div>
 
     <script>
         // --- State Management ---
         const state = {
-            files: [], // Array of { name: string, buffer: ArrayBuffer }
+            files: [], 
             currentFileIndex: 0,
             previewDoc: null, 
-            imgBytes: null, // DataURL
+            imgBytes: null, 
             imgType: null,
             pageNum: 1,
-            scale: 1.2,
+            scale: 1.0, 
             totalPages: 0,
             name: "",
             date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
             blockEl: null,
-            // Stores overrides. Key: "fileIdx-pageIdx" -> Value: { leftPct, topPct, widthPct }
-            customPositions: {}
+            customPositions: {},
+            batchTemplate: null
         };
 
         // --- DOM Elements ---
         const els = {
+            sidebar: document.getElementById('sidebar'),
+            toggleSidebarBtn: document.getElementById('toggle-sidebar'),
             pdfInput: document.getElementById('pdf-input'),
             imgInput: document.getElementById('img-input'),
             pdfName: document.getElementById('pdf-name'),
             fileCount: document.getElementById('file-count'),
             clearPdfsBtn: document.getElementById('clear-pdfs'),
+            fileListContainer: document.getElementById('file-list-container'),
             fileList: document.getElementById('file-list'),
             imgName: document.getElementById('img-name'),
             nameInput: document.getElementById('sig-name-input'),
             dateDisplay: document.getElementById('system-date'),
-            editor: document.getElementById('editor-section'),
-            actions: document.getElementById('action-section'),
+            controlsOverlay: document.getElementById('controls-overlay'),
             canvas: document.getElementById('pdf-render'),
             container: document.getElementById('canvas-container'),
+            blankState: document.getElementById('blank-state'),
             prevBtn: document.getElementById('prev-page'),
             nextBtn: document.getElementById('next-page'),
             prevFileBtn: document.getElementById('prev-file'),
@@ -283,25 +385,40 @@
             saveBtn: document.getElementById('save-btn'),
             downloadText: document.getElementById('download-text'),
             toast: document.getElementById('toast'),
+            toastMsg: document.getElementById('toast-msg'),
             positionSelect: document.getElementById('position-select'),
-            applyAllBtn: document.getElementById('apply-all-btn')
+            applyAllBtn: document.getElementById('apply-all-btn'),
+            zoomIn: document.getElementById('zoom-in'),
+            zoomOut: document.getElementById('zoom-out'),
+            zoomLevel: document.getElementById('zoom-level'),
+            tourBtn: document.getElementById('start-tour-btn')
         };
 
         const ctx = els.canvas.getContext('2d');
-
-        // Initialize Date
         els.dateDisplay.textContent = state.date;
+        els.saveBtn.disabled = true;
+
+        // Mobile Sidebar Toggle logic
+        let sidebarOpen = false;
+        els.toggleSidebarBtn.addEventListener('click', () => {
+            sidebarOpen = !sidebarOpen;
+            if(sidebarOpen) {
+                els.sidebar.classList.remove('-translate-x-full', 'absolute');
+                els.sidebar.classList.add('absolute', 'z-40', 'h-full');
+            } else {
+                els.sidebar.classList.add('-translate-x-full', 'absolute');
+            }
+        });
 
         // --- Event Listeners ---
+        
+        // PDF Upload
         els.pdfInput.addEventListener('change', async (e) => {
             const rawFiles = Array.from(e.target.files);
             if (rawFiles.length === 0) return;
 
             const newFilePromises = rawFiles.map(async (file) => {
-                return {
-                    name: file.name,
-                    buffer: await file.arrayBuffer()
-                };
+                return { name: file.name, buffer: await file.arrayBuffer() };
             });
 
             const newFiles = await Promise.all(newFilePromises);
@@ -310,6 +427,7 @@
             updateFileUI();
 
             if (state.files.length === newFiles.length) {
+                // First load
                 state.currentFileIndex = 0;
                 await loadFileForPreview(0);
             } else {
@@ -320,26 +438,24 @@
             els.pdfInput.value = '';
         });
 
+        // Clear PDFs
         els.clearPdfsBtn.addEventListener('click', () => {
             state.files = [];
-            state.customPositions = {}; // Clear positions
+            state.customPositions = {};
             state.currentFileIndex = 0;
             state.previewDoc = null;
             state.pageNum = 1;
             
-            els.pdfName.textContent = "Choose PDFs...";
-            els.fileCount.textContent = "Select one or more PDF files.";
-            els.clearPdfsBtn.classList.add('hidden');
-            els.fileList.classList.add('hidden');
-            els.fileList.innerHTML = '';
+            updateFileUI();
+            els.controlsOverlay.classList.add('opacity-50', 'pointer-events-none');
+            els.blankState.classList.remove('hidden');
+            els.container.classList.add('hidden');
+            els.saveBtn.disabled = true;
             
-            els.editor.classList.add('hidden');
-            els.actions.classList.add('hidden');
-            
-            ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
             if(state.blockEl) state.blockEl.style.display = 'none';
         });
 
+        // Image Upload
         els.imgInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -353,17 +469,20 @@
                     state.imgBytes = event.target.result;
                     renderSignatureBlock();
                     checkReady();
+                    showToast("Signature Image Loaded");
                 };
                 img.src = event.target.result;
             };
             reader.readAsDataURL(file);
         });
 
+        // Name Input
         els.nameInput.addEventListener('input', (e) => {
             state.name = e.target.value;
             renderSignatureBlock();
         });
 
+        // Navigation
         els.prevBtn.addEventListener('click', () => {
             if (state.pageNum <= 1) return;
             state.pageNum--;
@@ -388,42 +507,109 @@
             }
         });
 
+        // Zoom
+        els.zoomIn.addEventListener('click', () => {
+            if(state.scale < 2.5) {
+                state.scale += 0.2;
+                renderPage();
+                updateZoomDisplay();
+            }
+        });
+        els.zoomOut.addEventListener('click', () => {
+            if(state.scale > 0.4) {
+                state.scale -= 0.2;
+                renderPage();
+                updateZoomDisplay();
+            }
+        });
+        function updateZoomDisplay() {
+            els.zoomLevel.textContent = Math.round(state.scale * 100) + '%';
+        }
+
+        // Positioning
         els.positionSelect.addEventListener('change', (e) => {
             const mode = e.target.value;
-            // When user uses dropdown, we treat it as an explicit override for THIS page
-            if (state.blockEl) {
+            if (state.blockEl && mode !== 'manual') {
                 applyPositionPreset(mode);
-                saveCurrentPosition(); // Save immediately
+                saveCurrentPosition();
             }
         });
 
         els.applyAllBtn.addEventListener('click', () => {
             if (!state.blockEl) return;
-            // Save current position as the "template"
             saveCurrentPosition();
-            
             const currentKey = `${state.currentFileIndex}-${state.pageNum}`;
             const pos = state.customPositions[currentKey];
-            
-            // Confirm logic: Apply this {leftPct, topPct} to ALL keys
-            // Simple way: We just need to know that if a key is missing, it defaults.
-            // But user wants to overwrite.
-            // We can iterate through all pages of all files? 
-            // Better: Just store a "globalOverride" or populate all keys?
-            // To ensure independence later, let's populate keys. 
-            // Warning: We don't know total pages of other files until we load them.
-            // Strategy: We can't pre-populate easily without parsing all PDFs.
-            // ALTERNATIVE: Set a "globalDefault" variable, and only use customPositions for exceptions?
-            // BUT user asked for "custom position per page".
-            // Let's implement "Apply to All" by setting a flag or simply storing it in a way that generates use.
-            
-            // To properly support "Apply to All" across unloaded files, we'll iterate and load them? No, too slow.
-            // Let's just set a "batchTemplate" in state.
             state.batchTemplate = { ...pos };
-            showToast("Position applied to ALL pages as new default.");
+            showToast("Position copied to all pages!");
         });
 
         els.saveBtn.addEventListener('click', generateAll);
+
+        // --- TOUR Logic ---
+        els.tourBtn.addEventListener('click', startTour);
+
+        function startTour() {
+            const driver = window.driver.js.driver;
+            
+            const driverObj = driver({
+                showProgress: true,
+                popoverClass: 'driverjs-theme',
+                steps: [
+                    { 
+                        element: '#sidebar', 
+                        popover: { 
+                            title: 'Control Panel', 
+                            description: 'This sidebar is your command center. You will configure everything here.' 
+                        } 
+                    },
+                    { 
+                        element: '#tour-step-1', 
+                        popover: { 
+                            title: '1. Upload Documents', 
+                            description: 'Start by clicking here to upload your PDF files. You can upload multiple files at once.' 
+                        } 
+                    },
+                    { 
+                        element: '#tour-step-2', 
+                        popover: { 
+                            title: '2. Setup Signature', 
+                            description: 'Upload your signature image (PNG/JPG) here. It will automatically overlay on the PDF.' 
+                        } 
+                    },
+                    { 
+                        element: '#workspace-scroll', 
+                        popover: { 
+                            title: '3. Preview & Edit', 
+                            description: 'Your PDF will appear here. You can drag the signature block to position it manually.' 
+                        } 
+                    },
+                    { 
+                        element: '#tour-step-4', 
+                        popover: { 
+                            title: '4. Navigate', 
+                            description: 'Use these controls to switch between files and pages.' 
+                        } 
+                    },
+                    { 
+                        element: '#tour-step-5', 
+                        popover: { 
+                            title: '5. Fast Positioning', 
+                            description: 'Use the dropdown to quickly snap the signature to corners. Use "Apply to All" to set the position for every page in every file at once.' 
+                        } 
+                    },
+                    { 
+                        element: '#save-btn', 
+                        popover: { 
+                            title: '6. Download', 
+                            description: 'Once you are happy, click here to download your signed PDF(s). Processing happens entirely in your browser!' 
+                        } 
+                    }
+                ]
+            });
+
+            driverObj.drive();
+        }
 
 
         // --- Logic & Helpers ---
@@ -431,33 +617,36 @@
         function updateFileUI() {
             const count = state.files.length;
             if (count > 0) {
-                els.pdfName.textContent = `Add more PDFs...`; 
-                els.fileCount.textContent = `${count} file(s) in list.`;
-                els.clearPdfsBtn.classList.remove('hidden');
+                els.pdfName.textContent = "Add PDFs";
+                els.fileCount.textContent = `${count} files`;
+                els.fileListContainer.classList.remove('hidden');
                 
                 els.fileList.innerHTML = '';
-                els.fileList.classList.remove('hidden');
-                state.files.forEach((file) => {
+                state.files.forEach((file, idx) => {
+                    const isActive = idx === state.currentFileIndex;
                     const li = document.createElement('li');
-                    li.className = "text-sm text-gray-600 flex items-center bg-white border border-gray-200 px-3 py-2 rounded-md shadow-sm";
-                    li.innerHTML = `<i class="fas fa-file-pdf text-red-500 mr-2"></i> <span class="truncate flex-1">${file.name}</span>`;
+                    li.className = `text-xs px-2 py-1.5 rounded flex items-center gap-2 truncate ${isActive ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-100 cursor-pointer'}`;
+                    li.innerHTML = `<i class="fas fa-file-pdf ${isActive ? 'text-blue-500' : 'text-gray-400'}"></i> <span class="truncate">${file.name}</span>`;
+                    li.onclick = () => loadFileForPreview(idx);
                     els.fileList.appendChild(li);
                 });
 
                 if (count === 1) els.downloadText.textContent = "Download Signed PDF";
-                else els.downloadText.textContent = "Download All (ZIP)";
+                else els.downloadText.textContent = `Download ${count} Files (ZIP)`;
             } else {
-                els.pdfName.textContent = "Choose PDFs...";
-                els.fileCount.textContent = "Select one or more PDF files.";
-                els.clearPdfsBtn.classList.add('hidden');
-                els.fileList.classList.add('hidden');
+                els.pdfName.textContent = "Add PDFs";
+                els.fileListContainer.classList.add('hidden');
+                els.downloadText.textContent = "Download Signed PDF";
             }
         }
 
         function updateNavButtons() {
-            els.currentFileDisplay.textContent = `File ${state.currentFileIndex + 1} of ${state.files.length}`;
+            els.currentFileDisplay.textContent = `File ${state.currentFileIndex + 1}/${state.files.length}`;
             els.prevFileBtn.disabled = state.currentFileIndex === 0;
             els.nextFileBtn.disabled = state.currentFileIndex === state.files.length - 1;
+            
+            // Re-render list to show active state
+            updateFileUI();
         }
 
         async function loadFileForPreview(index) {
@@ -465,18 +654,17 @@
             updateNavButtons();
 
             const fileData = state.files[index];
-            const previewBuffer = fileData.buffer.slice(0);
-            
-            const loadingTask = pdfjsLib.getDocument(new Uint8Array(previewBuffer));
+            const loadingTask = pdfjsLib.getDocument(new Uint8Array(fileData.buffer.slice(0)));
             state.previewDoc = await loadingTask.promise;
             state.totalPages = state.previewDoc.numPages;
-            
-            // Default to page 1 for new file, unless navigating back/forth? 
-            // Standard PDF viewers reset to page 1 usually.
-            state.pageNum = 1; 
+            state.pageNum = 1;
             
             els.totalPageSpan.textContent = state.totalPages;
-            els.editor.classList.remove('hidden');
+            
+            // UI Toggle
+            els.blankState.classList.add('hidden');
+            els.container.classList.remove('hidden');
+            els.controlsOverlay.classList.remove('opacity-50', 'pointer-events-none');
             
             await renderPage();
         }
@@ -484,7 +672,7 @@
         function checkReady() {
             if (state.files.length > 0 && state.imgBytes) {
                 els.nameInput.disabled = false;
-                els.actions.classList.remove('hidden');
+                els.saveBtn.disabled = false;
             }
         }
 
@@ -553,7 +741,6 @@
             const dateEl = block.querySelector('.sig-date');
             dateEl.textContent = state.date;
 
-            // Initial width
             if (!block.style.width) block.style.width = '200px';
 
             setTimeout(placeBlockOnPage, 50);
@@ -565,18 +752,17 @@
             if (!state.blockEl) return;
             const key = `${state.currentFileIndex}-${state.pageNum}`;
             
-            // 1. Check for Page-Specific Override
+            // 1. Page Specific
             if (state.customPositions[key]) {
-                const pos = state.customPositions[key];
-                applyPositionFromPct(pos);
+                applyPositionFromPct(state.customPositions[key]);
                 els.positionSelect.value = "manual";
             } 
-            // 2. Check for Batch Template (Apply All)
+            // 2. Batch Template
             else if (state.batchTemplate) {
                 applyPositionFromPct(state.batchTemplate);
                 els.positionSelect.value = "manual";
             }
-            // 3. Default: Bottom Right
+            // 3. Default
             else {
                 applyPositionPreset("bottom-right");
                 els.positionSelect.value = "bottom-right";
@@ -588,7 +774,7 @@
             const containerH = els.container.offsetHeight;
             const blockW = state.blockEl.offsetWidth;
             const blockH = state.blockEl.offsetHeight;
-            const padding = 50; 
+            const padding = 30; 
 
             let left = 0;
             let top = 0;
@@ -625,9 +811,6 @@
             state.blockEl.style.left = `${left}px`;
             state.blockEl.style.top = `${top}px`;
             
-            // Restore Width if we saved it? 
-            // Currently aspect ratio handles height, but resizing changes width.
-            // If pos has widthPct, use it
             if (pos.widthPct) {
                 state.blockEl.style.width = `${pos.widthPct * containerW}px`;
             }
@@ -666,6 +849,7 @@
                 startTop = parseInt(el.style.top || 0);
                 
                 els.positionSelect.value = 'manual';
+                el.classList.add('active');
                 e.preventDefault();
             });
 
@@ -700,7 +884,8 @@
 
             window.addEventListener('mouseup', () => {
                 if (isDragging || isResizing) {
-                    saveCurrentPosition(); // Save state on drop
+                    saveCurrentPosition();
+                    el.classList.remove('active');
                 }
                 isDragging = false;
                 isResizing = false;
@@ -720,7 +905,6 @@
                 const zip = new JSZip();
                 const processedFiles = [];
 
-                // Iterate over all files
                 for (let i = 0; i < state.files.length; i++) {
                     const fileData = state.files[i];
                     const signedBytes = await processSinglePDF(fileData.buffer, i);
@@ -761,11 +945,9 @@
             if (state.imgType === 'image/jpeg') embeddedImage = await pdfDoc.embedJpg(imgBuf);
             else embeddedImage = await pdfDoc.embedPng(imgBuf);
 
-            // We need DOM dimensions for logic reference (blockW, blockH)
-            // We use the current state.blockEl visual specs as base
             const blockW_px = state.blockEl.offsetWidth;
             const blockH_px = state.blockEl.offsetHeight;
-            const s = state.scale; // DOM scale factor
+            const s = state.scale;
 
             const imgEl = state.blockEl.querySelector('img');
             const domImgW = imgEl.offsetWidth;
@@ -779,11 +961,9 @@
                 const { width: pageWidth, height: pageHeight } = page.getSize();
                 
                 let pdfBlockX, pdfBlockYTop;
-                let usedBlockW = blockW_px; // Might change if custom width stored
+                let usedBlockW = blockW_px;
 
                 const key = `${fileIndex}-${pageNum}`;
-                
-                // Determine Position strategy for this specific page
                 let pos = null;
                 if (state.customPositions[key]) {
                     pos = state.customPositions[key];
@@ -792,64 +972,34 @@
                 }
 
                 if (pos) {
-                    // Manual / Template Position (Percentage based)
                     pdfBlockX = pos.leftPct * pageWidth;
-                    
-                    // PDF Y is from bottom. DOM topPct is from top.
-                    // Top Y of block = pageHeight - (topPct * pageHeight)
                     const pdfTopY = pageHeight - (pos.topPct * pageHeight);
                     pdfBlockYTop = pdfTopY;
-                    
-                    // Width overrides?
-                    if (pos.widthPct) {
-                        usedBlockW = pos.widthPct * pageWidth * s; // Convert back to approx px for consistent text sizing? 
-                        // Actually, text size is fixed 12pt. 
-                        // The width of the BLOCK determines centering.
-                    }
+                    if (pos.widthPct) usedBlockW = pos.widthPct * pageWidth * s;
                 } else {
-                    // Default: Bottom Right
-                    const padding = 50 / s;
+                    const padding = 30 / s;
                     const blockW_PDF = blockW_px / s;
                     const blockH_PDF = blockH_px / s;
-                    
                     pdfBlockX = pageWidth - blockW_PDF - padding;
                     pdfBlockYTop = padding + blockH_PDF;
                 }
 
-                // --- Drawing ---
-                // We use 'usedBlockW' to determine centering center axis for text/image
-                // Note: stored pos.widthPct is in PDF context. 
-                // Let's convert everything to PDF Points for drawing.
-                
                 const pdfBlockW = (pos && pos.widthPct) ? (pos.widthPct * pageWidth) : (usedBlockW / s);
-                // Image Scale ratio
-                // DOM: imgW / blockW. Keep this ratio?
-                // Or just use natural aspect ratio of image fitted into blockW?
                 const ratio = domImgH / domImgW;
-                const pdfImgW = (domImgW / blockW_px) * pdfBlockW; 
-                // Wait, simplified: Image is usually 100% width of block?
-                // CSS: img { width: 100% }. So Image Width = Block Width.
-                
                 const drawImgW = pdfBlockW; 
                 const drawImgH = drawImgW * ratio;
-
-                // PDF Y Top is top of block.
-                // Image is drawn from bottom-left.
-                // If image is at top of block:
-                // Img Y = pdfBlockYTop - drawImgH
                 const imgY = pdfBlockYTop - drawImgH;
 
-                // 1. Draw Name
+                // Draw Text
                 const nameText = state.name || "";
                 let pdfNameY = 0;
                 
                 if (nameText) {
                     const fontSize = 12;
                     const textWidth = helveticaBold.widthOfTextAtSize(nameText, fontSize);
-                    const textXOffset = (pdfBlockW - textWidth) / 2; // Center in block
+                    const textXOffset = (pdfBlockW - textWidth) / 2;
                     const gap = 0; 
                     
-                    // Y = Below Image
                     pdfNameY = imgY - gap - fontSize;
 
                     page.drawText(nameText, {
@@ -867,7 +1017,6 @@
                         color: rgb(0, 0, 0),
                     });
 
-                    // 2. Draw Date
                     const dateText = state.date;
                     const dateFontSize = 10;
                     const dateWidth = helveticaFont.widthOfTextAtSize(dateText, dateFontSize);
@@ -883,9 +1032,9 @@
                     });
                 }
 
-                // 3. Draw Image (Top Layer)
+                // Draw Image
                 page.drawImage(embeddedImage, {
-                    x: pdfBlockX, // Image fills block width, so X is block X
+                    x: pdfBlockX,
                     y: imgY,
                     width: drawImgW,
                     height: drawImgH,
@@ -908,9 +1057,9 @@
         }
 
         function showToast(msg) {
-            els.toast.textContent = msg;
-            els.toast.classList.remove('translate-x-full');
-            setTimeout(() => els.toast.classList.add('translate-x-full'), 3000);
+            els.toastMsg.textContent = msg;
+            els.toast.classList.remove('opacity-0', 'translate-y-[-20px]');
+            setTimeout(() => els.toast.classList.add('opacity-0', 'translate-y-[-20px]'), 3000);
         }
     </script>
 </body>
