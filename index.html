@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Signature Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        #canvas-container {
+            position: relative;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            margin: 0 auto;
+        }
+        canvas {
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+        .signature-block {
+            position: absolute;
+            cursor: move;
+            border: 2px dashed transparent;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            user-select: none;
+            touch-action: none;
+            transition: border-color 0.2s;
+        }
+        .signature-block:hover {
+            border-color: #3b82f6;
+            background-color: rgba(59, 130, 246, 0.05);
+        }
+        .sig-image {
+            width: 100%;
+            height: auto;
+            pointer-events: none;
+            margin-bottom: -15px; 
+            z-index: 20; 
+            position: relative;
+            mix-blend-mode: multiply;
+        }
+        .sig-text {
+            text-align: center;
+            font-family: Helvetica, Arial, sans-serif;
+            line-height: 1.2;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        .sig-name {
+            font-weight: bold;
+            font-size: 16px;
+            margin-top: 0px; 
+            text-decoration: underline;
+            z-index: 10;
+            position: relative;
+            padding-top: 10px; 
+        }
+        .sig-date {
+            font-size: 12px;
+            margin-top: 2px;
+            color: #333;
+            z-index: 10;
+        }
+        .resize-handle {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background-color: #2563eb;
+            border-radius: 50%;
+            bottom: -6px;
+            right: -6px;
+            cursor: nwse-resize;
+            display: none;
+            z-index: 30;
+        }
+        .signature-block:hover .resize-handle {
+            display: block;
+        }
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-10">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <h1 class="text-xl font-bold text-gray-900 flex items-center gap-2">
+                <i class="fas fa-file-signature text-blue-600"></i> PDF Signer
+            </h1>
+        </div>
+    </header>
+
+    <main class="flex-grow container mx-auto px-4 py-8 max-w-5xl">
+        
+        <!-- Step 1: Uploads & Details -->
+        <div class="bg-white rounded-lg shadow-sm p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4">1. Document Details</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Files -->
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">PDF Document(s)</label>
+                        <div class="flex gap-2">
+                            <label class="flex-1 cursor-pointer bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-md px-4 py-2 text-sm text-gray-700 transition-colors flex items-center overflow-hidden">
+                                <i class="fas fa-file-pdf mr-2 text-red-500 flex-shrink-0"></i> 
+                                <span id="pdf-name" class="truncate">Choose PDFs...</span>
+                                <input type="file" id="pdf-input" accept="application/pdf" multiple class="hidden">
+                            </label>
+                            <button id="clear-pdfs" class="hidden px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-md hover:bg-red-100 transition-colors" title="Clear all files">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </div>
+                        
+                        <!-- File List -->
+                        <ul id="file-list" class="mt-3 space-y-2 max-h-40 overflow-y-auto hidden"></ul>
+                        <p class="text-xs text-gray-500 mt-2" id="file-count">Select one or more PDF files. You can add more later.</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Signature Image</label>
+                        <label class="flex w-full cursor-pointer bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-md px-4 py-2 text-sm text-gray-700 transition-colors items-center">
+                            <i class="fas fa-image mr-2 text-green-500"></i> <span id="img-name" class="truncate">Choose Image...</span>
+                            <input type="file" id="img-input" accept="image/png, image/jpeg" class="hidden">
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Signatory Info -->
+                <div class="space-y-4">
+                    <div>
+                        <label for="sig-name-input" class="block text-sm font-medium text-gray-700 mb-2">Signatory Name</label>
+                        <input type="text" id="sig-name-input" placeholder="e.g. John Doe" class="w-full border border-gray-300 rounded-md px-4 py-2 text-sm focus:ring-blue-500 focus:border-blue-500" disabled>
+                        <p class="text-xs text-gray-500 mt-1">Appears directly below the signature image.</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Date</label>
+                        <div class="w-full bg-gray-100 border border-gray-300 rounded-md px-4 py-2 text-sm text-gray-600 cursor-not-allowed">
+                            <i class="far fa-calendar-alt mr-2"></i> <span id="system-date">Loading...</span>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">System date (appears below name).</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Preview -->
+        <div id="editor-section" class="hidden bg-white rounded-lg shadow-sm p-6 mb-6">
+            
+            <!-- Controls Toolbar -->
+            <div class="flex flex-col gap-4 mb-4">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                         <h2 class="text-lg font-semibold text-gray-800">2. Review & Adjust (Per Page)</h2>
+                         <p class="text-xs text-gray-500">Positions are saved individually for every page.</p>
+                    </div>
+                    
+                    <!-- Quick Position -->
+                    <div class="flex items-center gap-2">
+                         <span class="text-sm text-gray-600 font-medium hidden sm:inline">Current Page:</span>
+                         <select id="position-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2">
+                            <option value="bottom-right">Bottom Right (Default)</option>
+                            <option value="bottom-left">Bottom Left</option>
+                            <option value="bottom-center">Bottom Center</option>
+                            <option value="top-right">Top Right</option>
+                            <option value="manual" disabled>Manual (Drag to set)</option>
+                         </select>
+                         <button id="apply-all-btn" class="ml-2 text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-2 rounded border border-blue-200 transition-colors" title="Copy current position to ALL pages in ALL files">
+                            Apply to All
+                         </button>
+                    </div>
+                </div>
+
+                <div class="flex flex-col sm:flex-row justify-between items-center bg-gray-100 p-2 rounded-lg gap-4">
+                    <!-- File Navigation -->
+                    <div class="flex items-center gap-2 w-full sm:w-auto justify-center">
+                        <button id="prev-file" class="p-2 hover:bg-white rounded-md text-gray-600 disabled:opacity-50 transition-all font-medium text-sm">
+                            <i class="fas fa-file-pdf mr-1"></i> Prev File
+                        </button>
+                        <span class="text-sm font-medium px-2 min-w-[120px] text-center truncate" id="current-file-display">
+                            File 1 of 1
+                        </span>
+                        <button id="next-file" class="p-2 hover:bg-white rounded-md text-gray-600 disabled:opacity-50 transition-all font-medium text-sm">
+                            Next File <i class="fas fa-chevron-right ml-1"></i>
+                        </button>
+                    </div>
+
+                    <!-- Page Navigation -->
+                    <div class="flex items-center gap-2 w-full sm:w-auto justify-center">
+                        <button id="prev-page" class="p-2 hover:bg-white rounded-md text-gray-600 disabled:opacity-50 transition-all">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <span class="text-sm font-medium px-2 min-w-[80px] text-center">
+                            Page <span id="curr-page">1</span> / <span id="total-pages">--</span>
+                        </span>
+                        <button id="next-page" class="p-2 hover:bg-white rounded-md text-gray-600 disabled:opacity-50 transition-all">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workspace -->
+            <div class="overflow-auto bg-gray-500 p-4 rounded-lg flex justify-center min-h-[500px]" id="workspace-scroll">
+                <div id="canvas-container">
+                    <canvas id="pdf-render"></canvas>
+                    <!-- Signature block injected here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Action -->
+        <div id="action-section" class="hidden fixed bottom-6 left-0 right-0 px-4 flex justify-center pointer-events-none">
+            <button id="save-btn" class="pointer-events-auto shadow-lg bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full flex items-center gap-2 transform transition hover:scale-105">
+                <i class="fas fa-file-download"></i> <span id="download-text">Download Signed PDF</span>
+            </button>
+        </div>
+
+    </main>
+
+    <!-- Notification -->
+    <div id="toast" class="fixed top-4 right-4 bg-gray-800 text-white px-4 py-2 rounded shadow-lg transform translate-x-full transition-transform duration-300 z-50">
+        Message
+    </div>
+
+    <script>
+        // --- State Management ---
+        const state = {
+            files: [], // Array of { name: string, buffer: ArrayBuffer }
+            currentFileIndex: 0,
+            previewDoc: null, 
+            imgBytes: null, // DataURL
+            imgType: null,
+            pageNum: 1,
+            scale: 1.2,
+            totalPages: 0,
+            name: "",
+            date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+            blockEl: null,
+            // Stores overrides. Key: "fileIdx-pageIdx" -> Value: { leftPct, topPct, widthPct }
+            customPositions: {}
+        };
+
+        // --- DOM Elements ---
+        const els = {
+            pdfInput: document.getElementById('pdf-input'),
+            imgInput: document.getElementById('img-input'),
+            pdfName: document.getElementById('pdf-name'),
+            fileCount: document.getElementById('file-count'),
+            clearPdfsBtn: document.getElementById('clear-pdfs'),
+            fileList: document.getElementById('file-list'),
+            imgName: document.getElementById('img-name'),
+            nameInput: document.getElementById('sig-name-input'),
+            dateDisplay: document.getElementById('system-date'),
+            editor: document.getElementById('editor-section'),
+            actions: document.getElementById('action-section'),
+            canvas: document.getElementById('pdf-render'),
+            container: document.getElementById('canvas-container'),
+            prevBtn: document.getElementById('prev-page'),
+            nextBtn: document.getElementById('next-page'),
+            prevFileBtn: document.getElementById('prev-file'),
+            nextFileBtn: document.getElementById('next-file'),
+            currentFileDisplay: document.getElementById('current-file-display'),
+            currPageSpan: document.getElementById('curr-page'),
+            totalPageSpan: document.getElementById('total-pages'),
+            saveBtn: document.getElementById('save-btn'),
+            downloadText: document.getElementById('download-text'),
+            toast: document.getElementById('toast'),
+            positionSelect: document.getElementById('position-select'),
+            applyAllBtn: document.getElementById('apply-all-btn')
+        };
+
+        const ctx = els.canvas.getContext('2d');
+
+        // Initialize Date
+        els.dateDisplay.textContent = state.date;
+
+        // --- Event Listeners ---
+        els.pdfInput.addEventListener('change', async (e) => {
+            const rawFiles = Array.from(e.target.files);
+            if (rawFiles.length === 0) return;
+
+            const newFilePromises = rawFiles.map(async (file) => {
+                return {
+                    name: file.name,
+                    buffer: await file.arrayBuffer()
+                };
+            });
+
+            const newFiles = await Promise.all(newFilePromises);
+            state.files = [...state.files, ...newFiles];
+
+            updateFileUI();
+
+            if (state.files.length === newFiles.length) {
+                state.currentFileIndex = 0;
+                await loadFileForPreview(0);
+            } else {
+                updateNavButtons();
+            }
+            
+            checkReady();
+            els.pdfInput.value = '';
+        });
+
+        els.clearPdfsBtn.addEventListener('click', () => {
+            state.files = [];
+            state.customPositions = {}; // Clear positions
+            state.currentFileIndex = 0;
+            state.previewDoc = null;
+            state.pageNum = 1;
+            
+            els.pdfName.textContent = "Choose PDFs...";
+            els.fileCount.textContent = "Select one or more PDF files.";
+            els.clearPdfsBtn.classList.add('hidden');
+            els.fileList.classList.add('hidden');
+            els.fileList.innerHTML = '';
+            
+            els.editor.classList.add('hidden');
+            els.actions.classList.add('hidden');
+            
+            ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
+            if(state.blockEl) state.blockEl.style.display = 'none';
+        });
+
+        els.imgInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            els.imgName.textContent = file.name;
+            state.imgType = file.type;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    state.imgBytes = event.target.result;
+                    renderSignatureBlock();
+                    checkReady();
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        els.nameInput.addEventListener('input', (e) => {
+            state.name = e.target.value;
+            renderSignatureBlock();
+        });
+
+        els.prevBtn.addEventListener('click', () => {
+            if (state.pageNum <= 1) return;
+            state.pageNum--;
+            renderPage();
+        });
+
+        els.nextBtn.addEventListener('click', () => {
+            if (state.pageNum >= state.totalPages) return;
+            state.pageNum++;
+            renderPage();
+        });
+
+        els.prevFileBtn.addEventListener('click', () => {
+            if (state.currentFileIndex > 0) {
+                loadFileForPreview(state.currentFileIndex - 1);
+            }
+        });
+
+        els.nextFileBtn.addEventListener('click', () => {
+            if (state.currentFileIndex < state.files.length - 1) {
+                loadFileForPreview(state.currentFileIndex + 1);
+            }
+        });
+
+        els.positionSelect.addEventListener('change', (e) => {
+            const mode = e.target.value;
+            // When user uses dropdown, we treat it as an explicit override for THIS page
+            if (state.blockEl) {
+                applyPositionPreset(mode);
+                saveCurrentPosition(); // Save immediately
+            }
+        });
+
+        els.applyAllBtn.addEventListener('click', () => {
+            if (!state.blockEl) return;
+            // Save current position as the "template"
+            saveCurrentPosition();
+            
+            const currentKey = `${state.currentFileIndex}-${state.pageNum}`;
+            const pos = state.customPositions[currentKey];
+            
+            // Confirm logic: Apply this {leftPct, topPct} to ALL keys
+            // Simple way: We just need to know that if a key is missing, it defaults.
+            // But user wants to overwrite.
+            // We can iterate through all pages of all files? 
+            // Better: Just store a "globalOverride" or populate all keys?
+            // To ensure independence later, let's populate keys. 
+            // Warning: We don't know total pages of other files until we load them.
+            // Strategy: We can't pre-populate easily without parsing all PDFs.
+            // ALTERNATIVE: Set a "globalDefault" variable, and only use customPositions for exceptions?
+            // BUT user asked for "custom position per page".
+            // Let's implement "Apply to All" by setting a flag or simply storing it in a way that generates use.
+            
+            // To properly support "Apply to All" across unloaded files, we'll iterate and load them? No, too slow.
+            // Let's just set a "batchTemplate" in state.
+            state.batchTemplate = { ...pos };
+            showToast("Position applied to ALL pages as new default.");
+        });
+
+        els.saveBtn.addEventListener('click', generateAll);
+
+
+        // --- Logic & Helpers ---
+
+        function updateFileUI() {
+            const count = state.files.length;
+            if (count > 0) {
+                els.pdfName.textContent = `Add more PDFs...`; 
+                els.fileCount.textContent = `${count} file(s) in list.`;
+                els.clearPdfsBtn.classList.remove('hidden');
+                
+                els.fileList.innerHTML = '';
+                els.fileList.classList.remove('hidden');
+                state.files.forEach((file) => {
+                    const li = document.createElement('li');
+                    li.className = "text-sm text-gray-600 flex items-center bg-white border border-gray-200 px-3 py-2 rounded-md shadow-sm";
+                    li.innerHTML = `<i class="fas fa-file-pdf text-red-500 mr-2"></i> <span class="truncate flex-1">${file.name}</span>`;
+                    els.fileList.appendChild(li);
+                });
+
+                if (count === 1) els.downloadText.textContent = "Download Signed PDF";
+                else els.downloadText.textContent = "Download All (ZIP)";
+            } else {
+                els.pdfName.textContent = "Choose PDFs...";
+                els.fileCount.textContent = "Select one or more PDF files.";
+                els.clearPdfsBtn.classList.add('hidden');
+                els.fileList.classList.add('hidden');
+            }
+        }
+
+        function updateNavButtons() {
+            els.currentFileDisplay.textContent = `File ${state.currentFileIndex + 1} of ${state.files.length}`;
+            els.prevFileBtn.disabled = state.currentFileIndex === 0;
+            els.nextFileBtn.disabled = state.currentFileIndex === state.files.length - 1;
+        }
+
+        async function loadFileForPreview(index) {
+            state.currentFileIndex = index;
+            updateNavButtons();
+
+            const fileData = state.files[index];
+            const previewBuffer = fileData.buffer.slice(0);
+            
+            const loadingTask = pdfjsLib.getDocument(new Uint8Array(previewBuffer));
+            state.previewDoc = await loadingTask.promise;
+            state.totalPages = state.previewDoc.numPages;
+            
+            // Default to page 1 for new file, unless navigating back/forth? 
+            // Standard PDF viewers reset to page 1 usually.
+            state.pageNum = 1; 
+            
+            els.totalPageSpan.textContent = state.totalPages;
+            els.editor.classList.remove('hidden');
+            
+            await renderPage();
+        }
+
+        function checkReady() {
+            if (state.files.length > 0 && state.imgBytes) {
+                els.nameInput.disabled = false;
+                els.actions.classList.remove('hidden');
+            }
+        }
+
+        async function renderPage() {
+            if (!state.previewDoc) return;
+            
+            els.currPageSpan.textContent = state.pageNum;
+            els.prevBtn.disabled = state.pageNum <= 1;
+            els.nextBtn.disabled = state.pageNum >= state.totalPages;
+
+            const page = await state.previewDoc.getPage(state.pageNum);
+            const viewport = page.getViewport({ scale: state.scale });
+
+            els.canvas.height = viewport.height;
+            els.canvas.width = viewport.width;
+            els.container.style.width = `${viewport.width}px`;
+            els.container.style.height = `${viewport.height}px`;
+
+            await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+            if (state.blockEl) {
+                state.blockEl.style.display = 'flex';
+                placeBlockOnPage();
+            }
+        }
+
+        function renderSignatureBlock() {
+            if (!state.imgBytes) return;
+
+            let block = document.getElementById('sig-block');
+            
+            if (!block) {
+                block = document.createElement('div');
+                block.id = 'sig-block';
+                block.className = 'signature-block';
+                
+                const img = document.createElement('img');
+                img.className = 'sig-image';
+                block.appendChild(img);
+                
+                const nameP = document.createElement('p');
+                nameP.className = 'sig-text sig-name';
+                block.appendChild(nameP);
+
+                const dateP = document.createElement('p');
+                dateP.className = 'sig-text sig-date';
+                block.appendChild(dateP);
+
+                const handle = document.createElement('div');
+                handle.className = 'resize-handle';
+                block.appendChild(handle);
+
+                els.container.appendChild(block);
+                state.blockEl = block;
+                
+                initDragAndResize(block, handle);
+            }
+
+            const imgEl = block.querySelector('img');
+            imgEl.src = state.imgBytes;
+            
+            const nameEl = block.querySelector('.sig-name');
+            nameEl.textContent = state.name || "Signatory Name";
+            nameEl.style.opacity = state.name ? "1" : "0.5";
+
+            const dateEl = block.querySelector('.sig-date');
+            dateEl.textContent = state.date;
+
+            // Initial width
+            if (!block.style.width) block.style.width = '200px';
+
+            setTimeout(placeBlockOnPage, 50);
+        }
+
+        // --- Positioning Logic ---
+
+        function placeBlockOnPage() {
+            if (!state.blockEl) return;
+            const key = `${state.currentFileIndex}-${state.pageNum}`;
+            
+            // 1. Check for Page-Specific Override
+            if (state.customPositions[key]) {
+                const pos = state.customPositions[key];
+                applyPositionFromPct(pos);
+                els.positionSelect.value = "manual";
+            } 
+            // 2. Check for Batch Template (Apply All)
+            else if (state.batchTemplate) {
+                applyPositionFromPct(state.batchTemplate);
+                els.positionSelect.value = "manual";
+            }
+            // 3. Default: Bottom Right
+            else {
+                applyPositionPreset("bottom-right");
+                els.positionSelect.value = "bottom-right";
+            }
+        }
+
+        function applyPositionPreset(mode) {
+            const containerW = els.container.offsetWidth;
+            const containerH = els.container.offsetHeight;
+            const blockW = state.blockEl.offsetWidth;
+            const blockH = state.blockEl.offsetHeight;
+            const padding = 50; 
+
+            let left = 0;
+            let top = 0;
+
+            switch (mode) {
+                case 'bottom-right':
+                    left = containerW - blockW - padding;
+                    top = containerH - blockH - padding;
+                    break;
+                case 'bottom-left':
+                    left = padding;
+                    top = containerH - blockH - padding;
+                    break;
+                case 'bottom-center':
+                    left = (containerW - blockW) / 2;
+                    top = containerH - blockH - padding;
+                    break;
+                case 'top-right':
+                    left = containerW - blockW - padding;
+                    top = padding;
+                    break;
+            }
+            state.blockEl.style.left = `${Math.max(0, left)}px`;
+            state.blockEl.style.top = `${Math.max(0, top)}px`;
+        }
+
+        function applyPositionFromPct(pos) {
+            const containerW = els.container.offsetWidth;
+            const containerH = els.container.offsetHeight;
+            
+            const left = pos.leftPct * containerW;
+            const top = pos.topPct * containerH;
+            
+            state.blockEl.style.left = `${left}px`;
+            state.blockEl.style.top = `${top}px`;
+            
+            // Restore Width if we saved it? 
+            // Currently aspect ratio handles height, but resizing changes width.
+            // If pos has widthPct, use it
+            if (pos.widthPct) {
+                state.blockEl.style.width = `${pos.widthPct * containerW}px`;
+            }
+        }
+
+        function saveCurrentPosition() {
+            const containerW = els.container.offsetWidth;
+            const containerH = els.container.offsetHeight;
+            const block = state.blockEl;
+            
+            const left = parseInt(block.style.left || 0);
+            const top = parseInt(block.style.top || 0);
+            const width = block.offsetWidth;
+
+            const pos = {
+                leftPct: left / containerW,
+                topPct: top / containerH,
+                widthPct: width / containerW
+            };
+
+            const key = `${state.currentFileIndex}-${state.pageNum}`;
+            state.customPositions[key] = pos;
+        }
+
+        function initDragAndResize(el, handle) {
+            let isDragging = false;
+            let isResizing = false;
+            let startX, startY, startLeft, startTop, startW;
+
+            el.addEventListener('mousedown', (e) => {
+                if (e.target === handle) return;
+                isDragging = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                startLeft = parseInt(el.style.left || 0);
+                startTop = parseInt(el.style.top || 0);
+                
+                els.positionSelect.value = 'manual';
+                e.preventDefault();
+            });
+
+            handle.addEventListener('mousedown', (e) => {
+                isResizing = true;
+                startX = e.clientX;
+                startW = el.offsetWidth;
+                e.stopPropagation();
+                e.preventDefault();
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    const dx = e.clientX - startX;
+                    const dy = e.clientY - startY;
+                    let newLeft = startLeft + dx;
+                    let newTop = startTop + dy;
+                    
+                    if (newLeft < 0) newLeft = 0;
+                    if (newTop < 0) newTop = 0;
+                    if (newLeft + el.offsetWidth > els.container.offsetWidth) newLeft = els.container.offsetWidth - el.offsetWidth;
+                    if (newTop + el.offsetHeight > els.container.offsetHeight) newTop = els.container.offsetHeight - el.offsetHeight;
+
+                    el.style.left = `${newLeft}px`;
+                    el.style.top = `${newTop}px`;
+                } else if (isResizing) {
+                    const dx = e.clientX - startX;
+                    const newW = Math.max(100, startW + dx);
+                    el.style.width = `${newW}px`;
+                }
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (isDragging || isResizing) {
+                    saveCurrentPosition(); // Save state on drop
+                }
+                isDragging = false;
+                isResizing = false;
+            });
+        }
+
+        // --- Generation ---
+
+        async function generateAll() {
+            if (state.files.length === 0 || !state.blockEl) return;
+
+            const btnOriginalText = els.downloadText.textContent;
+            els.downloadText.innerHTML = '<div class="loading-spinner border-white border-t-transparent w-4 h-4 inline-block mr-2"></div> Processing...';
+            els.saveBtn.disabled = true;
+
+            try {
+                const zip = new JSZip();
+                const processedFiles = [];
+
+                // Iterate over all files
+                for (let i = 0; i < state.files.length; i++) {
+                    const fileData = state.files[i];
+                    const signedBytes = await processSinglePDF(fileData.buffer, i);
+                    processedFiles.push({ name: fileData.name, data: signedBytes });
+                }
+
+                if (processedFiles.length === 1) {
+                    download(processedFiles[0].data, `Signed_${processedFiles[0].name}`, "application/pdf");
+                    showToast("PDF Saved successfully!");
+                } else {
+                    processedFiles.forEach(f => {
+                         zip.file(`Signed_${f.name}`, f.data);
+                    });
+                    const zipContent = await zip.generateAsync({type: "blob"});
+                    download(zipContent, "Signed_Documents.zip", "application/zip");
+                    showToast("ZIP Archive Saved!");
+                }
+
+            } catch (err) {
+                console.error(err);
+                showToast("Error: " + err.message);
+            } finally {
+                els.downloadText.textContent = btnOriginalText;
+                els.saveBtn.disabled = false;
+            }
+        }
+
+        async function processSinglePDF(buffer, fileIndex) {
+            const { PDFDocument, StandardFonts, rgb } = PDFLib;
+            const pdfDoc = await PDFDocument.load(buffer.slice(0));
+            
+            const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+            const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+            const imgRes = await fetch(state.imgBytes);
+            const imgBuf = await imgRes.arrayBuffer();
+            let embeddedImage;
+            if (state.imgType === 'image/jpeg') embeddedImage = await pdfDoc.embedJpg(imgBuf);
+            else embeddedImage = await pdfDoc.embedPng(imgBuf);
+
+            // We need DOM dimensions for logic reference (blockW, blockH)
+            // We use the current state.blockEl visual specs as base
+            const blockW_px = state.blockEl.offsetWidth;
+            const blockH_px = state.blockEl.offsetHeight;
+            const s = state.scale; // DOM scale factor
+
+            const imgEl = state.blockEl.querySelector('img');
+            const domImgW = imgEl.offsetWidth;
+            const domImgH = imgEl.offsetHeight;
+            
+            const pages = pdfDoc.getPages();
+            
+            for (let i = 0; i < pages.length; i++) {
+                const pageNum = i + 1;
+                const page = pages[i];
+                const { width: pageWidth, height: pageHeight } = page.getSize();
+                
+                let pdfBlockX, pdfBlockYTop;
+                let usedBlockW = blockW_px; // Might change if custom width stored
+
+                const key = `${fileIndex}-${pageNum}`;
+                
+                // Determine Position strategy for this specific page
+                let pos = null;
+                if (state.customPositions[key]) {
+                    pos = state.customPositions[key];
+                } else if (state.batchTemplate) {
+                    pos = state.batchTemplate;
+                }
+
+                if (pos) {
+                    // Manual / Template Position (Percentage based)
+                    pdfBlockX = pos.leftPct * pageWidth;
+                    
+                    // PDF Y is from bottom. DOM topPct is from top.
+                    // Top Y of block = pageHeight - (topPct * pageHeight)
+                    const pdfTopY = pageHeight - (pos.topPct * pageHeight);
+                    pdfBlockYTop = pdfTopY;
+                    
+                    // Width overrides?
+                    if (pos.widthPct) {
+                        usedBlockW = pos.widthPct * pageWidth * s; // Convert back to approx px for consistent text sizing? 
+                        // Actually, text size is fixed 12pt. 
+                        // The width of the BLOCK determines centering.
+                    }
+                } else {
+                    // Default: Bottom Right
+                    const padding = 50 / s;
+                    const blockW_PDF = blockW_px / s;
+                    const blockH_PDF = blockH_px / s;
+                    
+                    pdfBlockX = pageWidth - blockW_PDF - padding;
+                    pdfBlockYTop = padding + blockH_PDF;
+                }
+
+                // --- Drawing ---
+                // We use 'usedBlockW' to determine centering center axis for text/image
+                // Note: stored pos.widthPct is in PDF context. 
+                // Let's convert everything to PDF Points for drawing.
+                
+                const pdfBlockW = (pos && pos.widthPct) ? (pos.widthPct * pageWidth) : (usedBlockW / s);
+                // Image Scale ratio
+                // DOM: imgW / blockW. Keep this ratio?
+                // Or just use natural aspect ratio of image fitted into blockW?
+                const ratio = domImgH / domImgW;
+                const pdfImgW = (domImgW / blockW_px) * pdfBlockW; 
+                // Wait, simplified: Image is usually 100% width of block?
+                // CSS: img { width: 100% }. So Image Width = Block Width.
+                
+                const drawImgW = pdfBlockW; 
+                const drawImgH = drawImgW * ratio;
+
+                // PDF Y Top is top of block.
+                // Image is drawn from bottom-left.
+                // If image is at top of block:
+                // Img Y = pdfBlockYTop - drawImgH
+                const imgY = pdfBlockYTop - drawImgH;
+
+                // 1. Draw Name
+                const nameText = state.name || "";
+                let pdfNameY = 0;
+                
+                if (nameText) {
+                    const fontSize = 12;
+                    const textWidth = helveticaBold.widthOfTextAtSize(nameText, fontSize);
+                    const textXOffset = (pdfBlockW - textWidth) / 2; // Center in block
+                    const gap = 0; 
+                    
+                    // Y = Below Image
+                    pdfNameY = imgY - gap - fontSize;
+
+                    page.drawText(nameText, {
+                        x: pdfBlockX + textXOffset,
+                        y: pdfNameY,
+                        size: fontSize,
+                        font: helveticaBold,
+                        color: rgb(0, 0, 0),
+                    });
+
+                    page.drawLine({
+                        start: { x: pdfBlockX + textXOffset, y: pdfNameY - 2 },
+                        end: { x: pdfBlockX + textXOffset + textWidth, y: pdfNameY - 2 },
+                        thickness: 1,
+                        color: rgb(0, 0, 0),
+                    });
+
+                    // 2. Draw Date
+                    const dateText = state.date;
+                    const dateFontSize = 10;
+                    const dateWidth = helveticaFont.widthOfTextAtSize(dateText, dateFontSize);
+                    const dateXOffset = (pdfBlockW - dateWidth) / 2;
+                    const pdfDateY = pdfNameY - 14; 
+
+                    page.drawText(dateText, {
+                        x: pdfBlockX + dateXOffset,
+                        y: pdfDateY,
+                        size: dateFontSize,
+                        font: helveticaFont,
+                        color: rgb(0.2, 0.2, 0.2),
+                    });
+                }
+
+                // 3. Draw Image (Top Layer)
+                page.drawImage(embeddedImage, {
+                    x: pdfBlockX, // Image fills block width, so X is block X
+                    y: imgY,
+                    width: drawImgW,
+                    height: drawImgH,
+                });
+            }
+
+            return await pdfDoc.save();
+        }
+
+        function download(data, filename, type) {
+            const blob = (data instanceof Blob) ? data : new Blob([data], { type: type });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }
+
+        function showToast(msg) {
+            els.toast.textContent = msg;
+            els.toast.classList.remove('translate-x-full');
+            setTimeout(() => els.toast.classList.add('translate-x-full'), 3000);
+        }
+    </script>
+</body>
+</html>
