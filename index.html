@@ -110,6 +110,16 @@
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
         .driver-popover.driverjs-theme { background-color: #1e293b; color: #ffffff; }
+
+        .stamp-bank-item {
+            cursor: pointer;
+            transition: all 0.2s;
+            border-width: 1px;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .stamp-bank-item:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     </style>
 </head>
 <body class="flex flex-col bg-gray-100 h-screen overflow-hidden">
@@ -204,15 +214,25 @@
                             </div>
                         </div>
                         
-                        <!-- NEW: Stamp Preview Area -->
+                        <!-- Stamp Preview Area -->
                         <div class="mt-4 p-2 bg-gray-50 rounded-md border border-gray-200">
-                            <label class="text-[10px] font-bold text-gray-400 uppercase mb-2 block text-center">Live Preview</label>
+                            <div class="flex justify-between items-center mb-2">
+                                <label class="text-[10px] font-bold text-gray-400 uppercase block">Live Preview</label>
+                                <button id="save-to-bank-btn" class="text-[9px] bg-blue-600 text-white px-2 py-0.5 rounded hover:bg-blue-700 transition-colors uppercase font-bold">Save to Bank</button>
+                            </div>
                             <div class="flex justify-center py-4 bg-white rounded border border-gray-100 min-h-[60px] items-center">
                                 <div id="stamp-preview" class="stamp-block px-4 py-2 text-xl pointer-events-none" style="border-color: #ef4444; color: #ef4444;">PAID</div>
                             </div>
                         </div>
+
+                        <!-- Stamp Bank -->
+                        <div id="stamp-bank-container" class="hidden space-y-2 mt-4">
+                            <label class="text-[10px] font-bold text-gray-400 uppercase block">Saved Stamps (Bank)</label>
+                            <div id="stamp-bank-list" class="flex flex-wrap gap-2 p-2 bg-gray-50 rounded-md border border-gray-200 min-h-[40px]">
+                                <!-- Saved stamps will appear here -->
+                            </div>
+                        </div>
                     </div>
-                    <p class="text-[10px] text-gray-400">Stamps are added with the style shown above to the visible page.</p>
                 </div>
 
                 <hr class="border-gray-100">
@@ -303,6 +323,7 @@
             sigBlockEl: null,
             customPositions: {}, // Global signature positions
             stamps: {}, // Key: "fileIdx-pageIdx", Value: [ { text, color, hasBorder, xPct, yPct, wPct } ]
+            stampBank: [], // Array of saved stamp objects: { text, color, hasBorder }
             batchTemplate: null
         };
 
@@ -341,7 +362,10 @@
             stampColor: document.getElementById('stamp-color'),
             stampBorder: document.getElementById('stamp-border'),
             stampPreview: document.getElementById('stamp-preview'),
-            addStampBtn: document.getElementById('add-stamp-btn')
+            addStampBtn: document.getElementById('add-stamp-btn'),
+            saveToBankBtn: document.getElementById('save-to-bank-btn'),
+            stampBankList: document.getElementById('stamp-bank-list'),
+            stampBankContainer: document.getElementById('stamp-bank-container')
         };
 
         const ctx = els.canvas.getContext('2d');
@@ -407,10 +431,68 @@
         els.addStampBtn.addEventListener('click', () => {
             const text = els.stampInput.value.trim();
             if (!text) return;
-            addStamp(text);
+            addStamp({
+                text: text,
+                color: els.stampColor.value,
+                hasBorder: els.stampBorder.checked
+            });
             els.stampInput.value = '';
             updateStampPreview();
         });
+
+        els.saveToBankBtn.addEventListener('click', () => {
+            const text = els.stampInput.value.trim() || "PAID";
+            const config = {
+                text: text,
+                color: els.stampColor.value,
+                hasBorder: els.stampBorder.checked
+            };
+            
+            // Avoid duplicates
+            const isDuplicate = state.stampBank.some(s => s.text === config.text && s.color === config.color && s.hasBorder === config.hasBorder);
+            if (isDuplicate) {
+                showToast("Stamp already in bank");
+                return;
+            }
+
+            state.stampBank.push(config);
+            renderStampBank();
+            showToast("Stamp added to bank!");
+        });
+
+        function renderStampBank() {
+            els.stampBankList.innerHTML = '';
+            if (state.stampBank.length === 0) {
+                els.stampBankContainer.classList.add('hidden');
+                return;
+            }
+            
+            els.stampBankContainer.classList.remove('hidden');
+            state.stampBank.forEach((item, index) => {
+                const btn = document.createElement('div');
+                btn.className = 'stamp-bank-item px-2 py-1 rounded bg-white relative group';
+                btn.style.borderColor = item.color;
+                btn.style.color = item.color;
+                btn.style.borderStyle = item.hasBorder ? 'solid' : 'dashed';
+                btn.textContent = item.text;
+                
+                // Add to page on click
+                btn.onclick = () => addStamp(item);
+
+                // Delete button on hover
+                const del = document.createElement('div');
+                del.className = 'absolute -top-1 -right-1 bg-red-500 text-white w-3 h-3 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-[8px]';
+                del.innerHTML = '&times;';
+                del.onclick = (e) => {
+                    e.stopPropagation();
+                    state.stampBank.splice(index, 1);
+                    renderStampBank();
+                };
+                
+                btn.appendChild(del);
+                els.stampBankList.appendChild(btn);
+            });
+        }
 
         els.prevBtn.addEventListener('click', () => { if (state.pageNum > 1) { state.pageNum--; renderPage(); } });
         els.nextBtn.addEventListener('click', () => { if (state.pageNum < state.totalPages) { state.pageNum++; renderPage(); } });
@@ -496,18 +578,18 @@
             setTimeout(placeSigOnPage, 50);
         }
 
-        function addStamp(text) {
+        function addStamp(config) {
             const key = `${state.currentFileIndex}-${state.pageNum}`;
             if (!state.stamps[key]) state.stamps[key] = [];
             
             const stamp = { 
                 id: Date.now(),
-                text: text, 
-                color: els.stampColor.value,
-                hasBorder: els.stampBorder.checked,
+                text: config.text, 
+                color: config.color,
+                hasBorder: config.hasBorder,
                 leftPct: 0.1, 
                 topPct: 0.1, 
-                widthPct: 0.2 // Initial width
+                widthPct: 0.2
             };
             state.stamps[key].push(stamp);
             renderStampsForPage();
@@ -756,7 +838,7 @@
                 steps: [
                     { element: '#tour-step-1', popover: { title: '1. Documents', description: 'Upload one or multiple PDF files to be signed.' } },
                     { element: '#tour-step-2', popover: { title: '2. Signature', description: 'Upload your signature image and set your name.' } },
-                    { element: '#tour-step-stamps', popover: { title: '3. Stamps & Colors', description: 'Choose a color and border style, then click "+" to add unique stamps like "URGENT" or "APPROVED".' } },
+                    { element: '#tour-step-stamps', popover: { title: '3. Stamps & Bank', description: 'Create stamps and save them to your Bank to reuse them instantly across any page.' } },
                     { element: '#workspace-scroll', popover: { title: '4. Edit', description: 'Drag and resize signatures and stamps directly on the page.' } },
                     { element: '#save-btn', popover: { title: '5. Download', description: 'Process everything in your browser and download the results.' } }
                 ]
