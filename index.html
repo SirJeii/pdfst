@@ -120,6 +120,20 @@
             text-transform: uppercase;
         }
         .stamp-bank-item:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        
+        /* Modal Styles */
+        #validation-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
     </style>
 </head>
 <body class="flex flex-col bg-gray-100 h-screen overflow-hidden">
@@ -237,7 +251,7 @@
 
                 <hr class="border-gray-100">
 
-                <!-- 4. Navigation -->
+                <!-- 4. Navigation & Validation -->
                 <div id="controls-overlay" class="opacity-40 pointer-events-none space-y-4">
                     <div class="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
                         <div class="flex justify-between items-center">
@@ -262,9 +276,14 @@
                             <option value="top-right">Align: Top Right</option>
                             <option value="manual">Align: Manual (Drag)</option>
                         </select>
-                        <button id="apply-all-btn" class="w-full text-blue-600 hover:text-blue-700 text-[11px] font-bold py-2 border border-blue-100 rounded bg-blue-50 transition-colors">
-                            <i class="fas fa-clone mr-1"></i> Copy Position to All Pages
-                        </button>
+                        <div class="flex gap-2">
+                            <button id="apply-all-btn" class="flex-1 text-blue-600 hover:text-blue-700 text-[10px] font-bold py-2 border border-blue-100 rounded bg-blue-50 transition-colors">
+                                <i class="fas fa-clone mr-1"></i> Apply to All
+                            </button>
+                            <button id="verify-btn" class="flex-1 text-amber-600 hover:text-amber-700 text-[10px] font-bold py-2 border border-amber-100 rounded bg-amber-50 transition-colors">
+                                <i class="fas fa-check-double mr-1"></i> Verify Signs
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -302,6 +321,21 @@
         </div>
     </main>
 
+    <!-- Validation Modal -->
+    <div id="validation-modal" class="flex">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 relative">
+            <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <i class="fas fa-clipboard-check text-blue-500"></i> Signature Verification
+            </h3>
+            <div id="validation-content" class="max-h-80 overflow-y-auto mb-6 custom-scroll">
+                <!-- Validation result list -->
+            </div>
+            <div class="flex justify-end">
+                <button id="close-modal-btn" class="bg-slate-800 text-white px-5 py-2 rounded-lg font-bold text-sm">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification -->
     <div id="toast" class="fixed top-6 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl transition-all duration-300 z-50 opacity-0 pointer-events-none flex items-center gap-3">
         <i class="fas fa-info-circle text-blue-400"></i> <span id="toast-msg">Message</span>
@@ -310,7 +344,7 @@
     <script>
         // --- State Management ---
         const state = {
-            files: [], 
+            files: [], // { name, buffer, pageCount }
             currentFileIndex: 0,
             previewDoc: null, 
             imgBytes: null, 
@@ -354,6 +388,7 @@
             toastMsg: document.getElementById('toast-msg'),
             positionSelect: document.getElementById('position-select'),
             applyAllBtn: document.getElementById('apply-all-btn'),
+            verifyBtn: document.getElementById('verify-btn'),
             zoomIn: document.getElementById('zoom-in'),
             zoomOut: document.getElementById('zoom-out'),
             zoomLevel: document.getElementById('zoom-level'),
@@ -365,7 +400,10 @@
             addStampBtn: document.getElementById('add-stamp-btn'),
             saveToBankBtn: document.getElementById('save-to-bank-btn'),
             stampBankList: document.getElementById('stamp-bank-list'),
-            stampBankContainer: document.getElementById('stamp-bank-container')
+            stampBankContainer: document.getElementById('stamp-bank-container'),
+            validationModal: document.getElementById('validation-modal'),
+            validationContent: document.getElementById('validation-content'),
+            closeModalBtn: document.getElementById('close-modal-btn')
         };
 
         const ctx = els.canvas.getContext('2d');
@@ -377,7 +415,15 @@
         els.pdfInput.addEventListener('change', async (e) => {
             const rawFiles = Array.from(e.target.files);
             if (rawFiles.length === 0) return;
-            const newFiles = await Promise.all(rawFiles.map(async f => ({ name: f.name, buffer: await f.arrayBuffer() })));
+            
+            const newFiles = await Promise.all(rawFiles.map(async f => {
+                const buffer = await f.arrayBuffer();
+                // We briefly load the doc just to get the total page count for later verification
+                const tempDoc = await pdfjsLib.getDocument(new Uint8Array(buffer.slice(0))).promise;
+                const pageCount = tempDoc.numPages;
+                return { name: f.name, buffer, pageCount };
+            }));
+
             state.files = [...state.files, ...newFiles];
             updateFileUI();
             if (state.files.length === newFiles.length) await loadFile(0);
@@ -515,6 +561,70 @@
             const key = `${state.currentFileIndex}-${state.pageNum}`;
             state.batchTemplate = { ...state.customPositions[key] };
             showToast("Signature position applied to all pages!");
+        });
+
+        els.verifyBtn.addEventListener('click', () => {
+            const report = [];
+            let allSigned = true;
+
+            state.files.forEach((file, fIdx) => {
+                const missingPages = [];
+                for (let pNum = 1; pNum <= file.pageCount; pNum++) {
+                    const key = `${fIdx}-${pNum}`;
+                    // A page is "signed" if it has an individual position or a global batch position
+                    const hasSign = state.customPositions[key] || state.batchTemplate;
+                    if (!hasSign) {
+                        missingPages.push(pNum);
+                        allSigned = false;
+                    }
+                }
+                if (missingPages.length > 0) {
+                    report.push({ name: file.name, pages: missingPages });
+                }
+            });
+
+            renderValidationReport(report, allSigned);
+        });
+
+        function renderValidationReport(report, allSigned) {
+            els.validationContent.innerHTML = '';
+            
+            if (allSigned) {
+                els.validationContent.innerHTML = `
+                    <div class="text-center py-6">
+                        <i class="fas fa-check-circle text-green-500 text-4xl mb-3"></i>
+                        <p class="text-gray-700 font-medium">All documents are signed!</p>
+                        <p class="text-gray-400 text-xs mt-1">Every page in every file has a signature position assigned.</p>
+                    </div>
+                `;
+            } else {
+                const list = document.createElement('div');
+                list.className = 'space-y-4';
+                
+                const warning = document.createElement('p');
+                warning.className = 'text-amber-600 text-xs font-bold uppercase mb-2';
+                warning.textContent = 'Unsigned Pages Detected:';
+                list.appendChild(warning);
+
+                report.forEach(file => {
+                    const item = document.createElement('div');
+                    item.className = 'p-3 rounded-lg bg-gray-50 border border-gray-100';
+                    item.innerHTML = `
+                        <p class="text-[11px] font-bold text-gray-700 mb-1 truncate"><i class="fas fa-file-pdf text-red-400 mr-2"></i>${file.name}</p>
+                        <div class="flex flex-wrap gap-1">
+                            ${file.pages.map(p => `<span class="bg-white border border-gray-200 px-2 py-0.5 rounded text-[10px] text-gray-600">Pg ${p}</span>`).join('')}
+                        </div>
+                    `;
+                    list.appendChild(item);
+                });
+                els.validationContent.appendChild(list);
+            }
+
+            els.validationModal.style.display = 'flex';
+        }
+
+        els.closeModalBtn.addEventListener('click', () => {
+            els.validationModal.style.display = 'none';
         });
 
         els.saveBtn.addEventListener('click', generateAll);
@@ -748,22 +858,26 @@
                 const key = `${fIdx}-${i + 1}`;
 
                 // 1. Render Signature
-                let sigPos = state.customPositions[key] || state.batchTemplate || { leftPct: 0.7, topPct: 0.8, widthPct: 0.25 };
-                const drawW = sigPos.widthPct * pW;
-                const drawX = sigPos.leftPct * pW;
-                const drawYTop = pH - (sigPos.topPct * pH);
+                let sigPos = state.customPositions[key] || state.batchTemplate || null;
+                
+                // Only render signature if a position is explicitly set (manual or batch)
+                if (sigPos) {
+                    const drawW = sigPos.widthPct * pW;
+                    const drawX = sigPos.leftPct * pW;
+                    const drawYTop = pH - (sigPos.topPct * pH);
 
-                const imgAspect = state.sigBlockEl.querySelector('img').naturalHeight / state.sigBlockEl.querySelector('img').naturalWidth;
-                const drawH = drawW * imgAspect;
-                const imgY = drawYTop - drawH;
+                    const imgAspect = state.sigBlockEl.querySelector('img').naturalHeight / state.sigBlockEl.querySelector('img').naturalWidth;
+                    const drawH = drawW * imgAspect;
+                    const imgY = drawYTop - drawH;
 
-                p.drawImage(embeddedImg, { x: drawX, y: imgY, width: drawW, height: drawH });
+                    p.drawImage(embeddedImg, { x: drawX, y: imgY, width: drawW, height: drawH });
 
-                if (state.name) {
-                    const nameSize = 12;
-                    const textW = fontBold.widthOfTextAtSize(state.name, nameSize);
-                    p.drawText(state.name, { x: drawX + (drawW - textW)/2, y: imgY - 14, size: nameSize, font: fontBold });
-                    p.drawText(state.date, { x: drawX + (drawW - fontReg.widthOfTextAtSize(state.date, 9))/2, y: imgY - 26, size: 9, font: fontReg, color: rgb(0.3, 0.3, 0.3) });
+                    if (state.name) {
+                        const nameSize = 12;
+                        const textW = fontBold.widthOfTextAtSize(state.name, nameSize);
+                        p.drawText(state.name, { x: drawX + (drawW - textW)/2, y: imgY - 14, size: nameSize, font: fontBold });
+                        p.drawText(state.date, { x: drawX + (drawW - fontReg.widthOfTextAtSize(state.date, 9))/2, y: imgY - 26, size: 9, font: fontReg, color: rgb(0.3, 0.3, 0.3) });
+                    }
                 }
 
                 // 2. Render Stamps
@@ -839,7 +953,7 @@
                     { element: '#tour-step-1', popover: { title: '1. Documents', description: 'Upload one or multiple PDF files to be signed.' } },
                     { element: '#tour-step-2', popover: { title: '2. Signature', description: 'Upload your signature image and set your name.' } },
                     { element: '#tour-step-stamps', popover: { title: '3. Stamps & Bank', description: 'Create stamps and save them to your Bank to reuse them instantly across any page.' } },
-                    { element: '#workspace-scroll', popover: { title: '4. Edit', description: 'Drag and resize signatures and stamps directly on the page.' } },
+                    { element: '#verify-btn', popover: { title: '4. Verification', description: 'Check all files and pages to see if you missed any signatures before downloading.' } },
                     { element: '#save-btn', popover: { title: '5. Download', description: 'Process everything in your browser and download the results.' } }
                 ]
             }).drive();
