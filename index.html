@@ -59,8 +59,7 @@
         .movable-block:hover { border-color: #2563eb; background-color: rgba(59, 130, 246, 0.05); }
         .movable-block.active { border-color: #2563eb; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15); z-index: 50; }
 
-        .stamp-block { border-color: #ef4444; color: #ef4444; border-style: solid; border-width: 3px; border-radius: 4px; font-weight: 800; text-transform: uppercase; }
-        .stamp-block:hover { border-color: #dc2626; }
+        .stamp-block { border-style: solid; border-width: 3px; border-radius: 4px; font-weight: 800; text-transform: uppercase; }
         
         .delete-btn {
             position: absolute;
@@ -187,13 +186,33 @@
                         <span>3. Custom Stamps</span>
                         <span class="text-[10px] bg-red-100 text-red-600 px-1.5 rounded">Page Specific</span>
                     </h2>
-                    <div class="flex gap-2">
-                        <input type="text" id="stamp-text-input" placeholder="e.g. PAID" class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-1 focus:ring-red-500 outline-none">
-                        <button id="add-stamp-btn" class="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-md transition-colors" title="Add stamp to current page">
-                            <i class="fas fa-plus"></i>
-                        </button>
+                    <div class="space-y-3">
+                        <div class="flex gap-2">
+                            <input type="text" id="stamp-text-input" placeholder="e.g. PAID" class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-1 focus:ring-red-500 outline-none">
+                            <button id="add-stamp-btn" class="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-md transition-colors" title="Add stamp to current page">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
+                        <div class="flex items-center justify-between gap-3 bg-gray-50 p-2 rounded-md border border-gray-100">
+                            <div class="flex items-center gap-2">
+                                <label class="text-[10px] font-bold text-gray-400 uppercase">Color:</label>
+                                <input type="color" id="stamp-color" value="#ef4444" class="w-8 h-8 rounded border-none bg-transparent cursor-pointer">
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" id="stamp-border" checked class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                                <label for="stamp-border" class="text-[10px] font-bold text-gray-400 uppercase cursor-pointer">Border</label>
+                            </div>
+                        </div>
+                        
+                        <!-- NEW: Stamp Preview Area -->
+                        <div class="mt-4 p-2 bg-gray-50 rounded-md border border-gray-200">
+                            <label class="text-[10px] font-bold text-gray-400 uppercase mb-2 block text-center">Live Preview</label>
+                            <div class="flex justify-center py-4 bg-white rounded border border-gray-100 min-h-[60px] items-center">
+                                <div id="stamp-preview" class="stamp-block px-4 py-2 text-xl pointer-events-none" style="border-color: #ef4444; color: #ef4444;">PAID</div>
+                            </div>
+                        </div>
                     </div>
-                    <p class="text-[10px] text-gray-400">Stamps are added only to the current visible page.</p>
+                    <p class="text-[10px] text-gray-400">Stamps are added with the style shown above to the visible page.</p>
                 </div>
 
                 <hr class="border-gray-100">
@@ -283,7 +302,7 @@
             date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
             sigBlockEl: null,
             customPositions: {}, // Global signature positions
-            stamps: {}, // Key: "fileIdx-pageIdx", Value: [ { text, xPct, yPct, wPct } ]
+            stamps: {}, // Key: "fileIdx-pageIdx", Value: [ { text, color, hasBorder, xPct, yPct, wPct } ]
             batchTemplate: null
         };
 
@@ -319,6 +338,9 @@
             zoomLevel: document.getElementById('zoom-level'),
             tourBtn: document.getElementById('start-tour-btn'),
             stampInput: document.getElementById('stamp-text-input'),
+            stampColor: document.getElementById('stamp-color'),
+            stampBorder: document.getElementById('stamp-border'),
+            stampPreview: document.getElementById('stamp-preview'),
             addStampBtn: document.getElementById('add-stamp-btn')
         };
 
@@ -366,11 +388,28 @@
             renderSignatureBlock();
         });
 
+        // LIVE STAMP PREVIEW LOGIC
+        const updateStampPreview = () => {
+            const text = els.stampInput.value.trim() || "PAID";
+            const color = els.stampColor.value;
+            const hasBorder = els.stampBorder.checked;
+            
+            els.stampPreview.textContent = text;
+            els.stampPreview.style.color = color;
+            els.stampPreview.style.borderColor = color;
+            els.stampPreview.style.borderStyle = hasBorder ? 'solid' : 'none';
+        };
+
+        els.stampInput.addEventListener('input', updateStampPreview);
+        els.stampColor.addEventListener('input', updateStampPreview);
+        els.stampBorder.addEventListener('change', updateStampPreview);
+
         els.addStampBtn.addEventListener('click', () => {
             const text = els.stampInput.value.trim();
             if (!text) return;
             addStamp(text);
             els.stampInput.value = '';
+            updateStampPreview();
         });
 
         els.prevBtn.addEventListener('click', () => { if (state.pageNum > 1) { state.pageNum--; renderPage(); } });
@@ -464,6 +503,8 @@
             const stamp = { 
                 id: Date.now(),
                 text: text, 
+                color: els.stampColor.value,
+                hasBorder: els.stampBorder.checked,
                 leftPct: 0.1, 
                 topPct: 0.1, 
                 widthPct: 0.2 // Initial width
@@ -473,8 +514,7 @@
         }
 
         function renderStampsForPage() {
-            // Remove existing stamp DOM elements
-            document.querySelectorAll('.stamp-block').forEach(el => el.remove());
+            document.querySelectorAll('.stamp-block:not(#stamp-preview)').forEach(el => el.remove());
             
             const key = `${state.currentFileIndex}-${state.pageNum}`;
             const pageStamps = state.stamps[key] || [];
@@ -485,11 +525,14 @@
                 block.style.width = `${stamp.widthPct * els.container.offsetWidth}px`;
                 block.style.left = `${stamp.leftPct * els.container.offsetWidth}px`;
                 block.style.top = `${stamp.topPct * els.container.offsetHeight}px`;
+                block.style.borderColor = stamp.color;
+                block.style.color = stamp.color;
+                block.style.borderStyle = stamp.hasBorder ? 'solid' : 'none';
+                
                 block.innerHTML = `<span>${stamp.text}</span><div class="delete-btn"><i class="fas fa-times"></i></div><div class="resize-handle"></div>`;
                 
                 els.container.appendChild(block);
                 
-                // Events for stamp
                 block.querySelector('.delete-btn').onclick = (e) => {
                     e.stopPropagation();
                     state.stamps[key] = state.stamps[key].filter(s => s.id !== stamp.id);
@@ -599,6 +642,13 @@
             finally { els.downloadText.textContent = state.files.length > 1 ? `Download ${state.files.length} Files (ZIP)` : "Download Signed PDF"; els.saveBtn.disabled = false; }
         }
 
+        const hexToRgb = (hex) => {
+            const r = parseInt(hex.slice(1, 3), 16) / 255;
+            const g = parseInt(hex.slice(3, 5), 16) / 255;
+            const b = parseInt(hex.slice(5, 7), 16) / 255;
+            return { r, g, b };
+        };
+
         async function processPDF(buffer, fIdx) {
             const { PDFDocument, StandardFonts, rgb } = PDFLib;
             const pdfDoc = await PDFDocument.load(buffer.slice(0));
@@ -621,7 +671,6 @@
                 const drawX = sigPos.leftPct * pW;
                 const drawYTop = pH - (sigPos.topPct * pH);
 
-                // Img Aspect Ratio
                 const imgAspect = state.sigBlockEl.querySelector('img').naturalHeight / state.sigBlockEl.querySelector('img').naturalWidth;
                 const drawH = drawW * imgAspect;
                 const imgY = drawYTop - drawH;
@@ -640,18 +689,21 @@
                 pageStamps.forEach(s => {
                     const sW = s.widthPct * pW;
                     const sX = s.leftPct * pW;
-                    const sY = pH - (s.topPct * pH) - 30; // Approx height
+                    const sY = pH - (s.topPct * pH) - 30;
                     const sSize = Math.max(12, sW / 6);
-                    
-                    // Draw box for stamp
                     const tw = fontBold.widthOfTextAtSize(s.text, sSize);
-                    p.drawRectangle({
-                        x: sX, y: sY - 5,
-                        width: Math.max(sW, tw + 20), height: sSize + 15,
-                        borderColor: rgb(0.9, 0.2, 0.2), borderWidth: 2,
-                        color: rgb(1, 0.95, 0.95)
-                    });
-                    p.drawText(s.text, { x: sX + 10, y: sY + 2, size: sSize, font: fontBold, color: rgb(0.9, 0.2, 0.2) });
+                    const drawColor = hexToRgb(s.color || '#ef4444');
+                    const libColor = rgb(drawColor.r, drawColor.g, drawColor.b);
+                    
+                    if (s.hasBorder) {
+                        p.drawRectangle({
+                            x: sX, y: sY - 5,
+                            width: Math.max(sW, tw + 20), height: sSize + 15,
+                            borderColor: libColor, borderWidth: 2,
+                            color: rgb(1, 0.98, 0.98)
+                        });
+                    }
+                    p.drawText(s.text, { x: sX + 10, y: sY + 2, size: sSize, font: fontBold, color: libColor });
                 });
             }
             return await pdfDoc.save();
@@ -704,7 +756,7 @@
                 steps: [
                     { element: '#tour-step-1', popover: { title: '1. Documents', description: 'Upload one or multiple PDF files to be signed.' } },
                     { element: '#tour-step-2', popover: { title: '2. Signature', description: 'Upload your signature image and set your name.' } },
-                    { element: '#tour-step-stamps', popover: { title: '3. Stamps', description: 'Type text and click "+" to add unique stamps like "PAID" to the current page.' } },
+                    { element: '#tour-step-stamps', popover: { title: '3. Stamps & Colors', description: 'Choose a color and border style, then click "+" to add unique stamps like "URGENT" or "APPROVED".' } },
                     { element: '#workspace-scroll', popover: { title: '4. Edit', description: 'Drag and resize signatures and stamps directly on the page.' } },
                     { element: '#save-btn', popover: { title: '5. Download', description: 'Process everything in your browser and download the results.' } }
                 ]
