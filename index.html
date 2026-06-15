@@ -200,6 +200,21 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Font Controls -->
+                    <div class="grid grid-cols-3 gap-2">
+                        <div class="col-span-2">
+                            <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">Font Face</label>
+                            <select id="sig-font-family" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+                                <option value="Helvetica">Helvetica</option>
+                                <option value="TimesRoman">Times Roman</option>
+                                <option value="Courier">Courier</option>
+                            </select>
+                        </div>
+                        <div class="col-span-1">
+                            <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">Size (pt)</label>
+                            <input type="number" id="sig-font-size" value="12" min="6" max="72" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+                        </div>
+                    </div>
                 </div>
 
                 <hr class="border-gray-100">
@@ -354,6 +369,8 @@
             totalPages: 0,
             name: "",
             date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+            fontFamily: "Helvetica",
+            fontSize: 12,
             sigBlockEl: null,
             customPositions: {}, // Global signature positions
             stamps: {}, // Key: "fileIdx-pageIdx", Value: [ { text, color, hasBorder, xPct, yPct, wPct } ]
@@ -371,6 +388,8 @@
             imgName: document.getElementById('img-name'),
             nameInput: document.getElementById('sig-name-input'),
             dateDisplay: document.getElementById('system-date'),
+            fontFamilyInput: document.getElementById('sig-font-family'),
+            fontSizeInput: document.getElementById('sig-font-size'),
             controlsOverlay: document.getElementById('controls-overlay'),
             canvas: document.getElementById('pdf-render'),
             container: document.getElementById('canvas-container'),
@@ -455,6 +474,16 @@
 
         els.nameInput.addEventListener('input', (e) => {
             state.name = e.target.value;
+            renderSignatureBlock();
+        });
+
+        els.fontFamilyInput.addEventListener('change', (e) => {
+            state.fontFamily = e.target.value;
+            renderSignatureBlock();
+        });
+
+        els.fontSizeInput.addEventListener('input', (e) => {
+            state.fontSize = parseInt(e.target.value) || 12;
             renderSignatureBlock();
         });
 
@@ -681,9 +710,26 @@
                     saveSigPos();
                 });
             }
+            
             state.sigBlockEl.querySelector('img').src = state.imgBytes;
-            state.sigBlockEl.querySelector('.sig-name').textContent = state.name || "Signatory Name";
-            state.sigBlockEl.querySelector('.sig-date').textContent = state.date;
+            
+            const fontMap = {
+                'Helvetica': 'Arial, Helvetica, sans-serif',
+                'TimesRoman': '"Times New Roman", Times, serif',
+                'Courier': '"Courier New", Courier, monospace'
+            };
+
+            // Update Name
+            const nameEl = state.sigBlockEl.querySelector('.sig-name');
+            nameEl.textContent = state.name || "Signatory Name";
+            nameEl.style.fontSize = `${state.fontSize * 1.333}px`;
+            nameEl.style.fontFamily = fontMap[state.fontFamily];
+            
+            // Update Date
+            const dateEl = state.sigBlockEl.querySelector('.sig-date');
+            dateEl.textContent = state.date;
+            dateEl.style.fontFamily = fontMap[state.fontFamily];
+
             if (!state.sigBlockEl.style.width) state.sigBlockEl.style.width = '180px';
             setTimeout(placeSigOnPage, 50);
         }
@@ -844,8 +890,19 @@
         async function processPDF(buffer, fIdx) {
             const { PDFDocument, StandardFonts, rgb } = PDFLib;
             const pdfDoc = await PDFDocument.load(buffer.slice(0));
-            const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-            const fontReg = await pdfDoc.embedFont(StandardFonts.Helvetica);
+            
+            // Setup Fonts dynamically based on user selection
+            let fontReg, fontBold;
+            if (state.fontFamily === 'TimesRoman') {
+                fontReg = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+                fontBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+            } else if (state.fontFamily === 'Courier') {
+                fontReg = await pdfDoc.embedFont(StandardFonts.Courier);
+                fontBold = await pdfDoc.embedFont(StandardFonts.CourierBold);
+            } else {
+                fontReg = await pdfDoc.embedFont(StandardFonts.Helvetica);
+                fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+            }
 
             const imgRes = await fetch(state.imgBytes);
             const imgBuf = await imgRes.arrayBuffer();
@@ -873,10 +930,11 @@
                     p.drawImage(embeddedImg, { x: drawX, y: imgY, width: drawW, height: drawH });
 
                     if (state.name) {
-                        const nameSize = 12;
+                        const nameSize = state.fontSize || 12;
                         const textW = fontBold.widthOfTextAtSize(state.name, nameSize);
-                        p.drawText(state.name, { x: drawX + (drawW - textW)/2, y: imgY - 14, size: nameSize, font: fontBold });
-                        p.drawText(state.date, { x: drawX + (drawW - fontReg.widthOfTextAtSize(state.date, 9))/2, y: imgY - 26, size: 9, font: fontReg, color: rgb(0.3, 0.3, 0.3) });
+                        // Using Y-offset math based on the dynamic font size to prevent overlapping
+                        p.drawText(state.name, { x: drawX + (drawW - textW)/2, y: imgY - (nameSize + 2), size: nameSize, font: fontBold });
+                        p.drawText(state.date, { x: drawX + (drawW - fontReg.widthOfTextAtSize(state.date, 9))/2, y: imgY - (nameSize + 14), size: 9, font: fontReg, color: rgb(0.3, 0.3, 0.3) });
                     }
                 }
 
